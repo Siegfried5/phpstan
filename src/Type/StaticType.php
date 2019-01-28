@@ -77,7 +77,10 @@ class StaticType implements StaticResolvableType, TypeWithClassName
 
 	public function equals(Type $type): bool
 	{
-		return $this->staticObjectType->equals($type);
+		if (!$type instanceof static) {
+			return false;
+		}
+		return $this->staticObjectType->equals($type->staticObjectType);
 	}
 
 	public function describe(VerbosityLevel $level): string

@@ -2,6 +2,7 @@
 
 namespace PHPStan\Analyser;
 
+use function array_keys;
 use PhpParser\Node;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\Array_;
@@ -1151,7 +1152,7 @@ class Scope implements ClassMemberAccessAnswerer
 		}
 
 		$exprString = $this->printer->prettyPrintExpr($node);
-		if (isset($this->moreSpecificTypes[$exprString])) {
+		if (isset($this->moreSpecificTypes[$exprString]) && $this->moreSpecificTypes[$exprString]->getCertainty()->yes()) {
 			return $this->moreSpecificTypes[$exprString]->getType();
 		}
 
@@ -2247,16 +2248,13 @@ class Scope implements ClassMemberAccessAnswerer
 			$variableTypes = $this->getVariableTypes();
 			$variableTypes[$variableName] = VariableTypeHolder::createYes($type);
 
-			$moreSpecificTypes = $this->moreSpecificTypes;
-			$moreSpecificTypes[$exprString] = $variableTypes[$variableName];
-
 			return $this->scopeFactory->create(
 				$this->context,
 				$this->isDeclareStrictTypes(),
 				$this->getFunction(),
 				$this->getNamespace(),
 				$variableTypes,
-				$moreSpecificTypes,
+				$this->moreSpecificTypes,
 				$this->inClosureBindScopeClass,
 				$this->getAnonymousFunctionReturnType(),
 				$this->getInFunctionCall(),
@@ -2287,7 +2285,7 @@ class Scope implements ClassMemberAccessAnswerer
 	{
 		$exprString = $this->printer->prettyPrintExpr($expr);
 		$moreSpecificTypeHolders = $this->moreSpecificTypes;
-		if (isset($moreSpecificTypeHolders[$exprString]) && !$moreSpecificTypeHolders[$exprString]->getType() instanceof MixedType) {
+		if (isset($moreSpecificTypeHolders[$exprString])) {
 			unset($moreSpecificTypeHolders[$exprString]);
 			return $this->scopeFactory->create(
 				$this->context,
@@ -2369,15 +2367,6 @@ class Scope implements ClassMemberAccessAnswerer
 		}
 
 		return $scope;
-	}
-
-	public function specifyFetchedStaticPropertyFromIsset(Expr\StaticPropertyFetch $expr): self
-	{
-		$exprString = $this->printer->prettyPrintExpr($expr);
-
-		return $this->addMoreSpecificTypes([
-			$exprString => new MixedType(),
-		]);
 	}
 
 	public function enterNegation(): self
@@ -2485,16 +2474,13 @@ class Scope implements ClassMemberAccessAnswerer
 			}
 		}
 
-		$moreSpecificTypes = [];
-		$specifiedTypesIntersection = array_intersect_key($this->moreSpecificTypes, $otherScope->moreSpecificTypes);
-		foreach ($specifiedTypesIntersection as $exprString => $type) {
-			if (!$this->moreSpecificTypes[$exprString]->getType()->equals($otherScope->moreSpecificTypes[$exprString]->getType())) {
-				continue;
+		$ourMoreSpecificTypes = $this->moreSpecificTypes;
+		$theirMoreSpecificTypes = $otherScope->moreSpecificTypes;
+		$intersectedMoreSpecificTypes = [];
+		foreach ($ourMoreSpecificTypes as $exprString => $typeHolder) {
+			if (isset($theirMoreSpecificTypes[$exprString])) {
+				$intersectedMoreSpecificTypes[$exprString] = $typeHolder->and($theirMoreSpecificTypes[$exprString]);
 			}
-
-			// todo udelat z moreSpecificTypes opet jen Type[]
-
-			$moreSpecificTypes[$exprString] = $this->moreSpecificTypes[$exprString];
 		}
 
 		return $this->scopeFactory->create(
@@ -2503,12 +2489,110 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->getFunction(),
 			$this->getNamespace(),
 			$intersectedVariableTypeHolders,
+			$intersectedMoreSpecificTypes,
+			$this->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
+			$this->inFirstLevelStatement
+		);
+	}
+
+	public function generalizeWith(self $otherScope): self
+	{
+		$variableTypeHolders = $this->generalizeVariableTypeHolders(
+			$this->getVariableTypes(),
+			$otherScope->getVariableTypes()
+		);
+
+		$moreSpecificTypes = $this->generalizeVariableTypeHolders(
+			$this->moreSpecificTypes,
+			$otherScope->moreSpecificTypes
+		);
+
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$variableTypeHolders,
 			$moreSpecificTypes,
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
 			$this->inFirstLevelStatement
 		);
+	}
+
+	/**
+	 * @param VariableTypeHolder[] $variableTypeHolders
+	 * @param VariableTypeHolder[] $otherVariableTypeHolders
+	 * @return VariableTypeHolder[]
+	 */
+	private function generalizeVariableTypeHolders(
+		array $variableTypeHolders,
+		array $otherVariableTypeHolders
+	): array
+	{
+		foreach ($variableTypeHolders as $name => $variableTypeHolder) {
+			if (!isset($otherVariableTypeHolders[$name])) {
+				continue;
+			}
+
+			$constantTypes = TypeUtils::getAnyConstantTypes($variableTypeHolder->getType());
+			$theirConstantTypes = TypeUtils::getAnyConstantTypes($otherVariableTypeHolders[$name]->getType());
+
+			if (
+				count($constantTypes) > 0
+				&& count($theirConstantTypes) > 0
+				&& !$variableTypeHolder->getType()->equals($otherVariableTypeHolders[$name]->getType())
+			) {
+				$variableTypeHolders[$name] = new VariableTypeHolder(
+					TypeUtils::generalizeType($variableTypeHolder->getType()),
+					$variableTypeHolder->getCertainty()
+				);
+			}
+		}
+
+		return $variableTypeHolders;
+	}
+
+	public function equals(self $otherScope): bool
+	{
+		if (!$this->context->equals($otherScope->context)) {
+			return false;
+		}
+
+		if (!$this->compareVariableTypeHolders($this->variableTypes, $otherScope->variableTypes)) {
+			return false;
+		}
+
+		return $this->compareVariableTypeHolders($this->moreSpecificTypes, $otherScope->moreSpecificTypes);
+	}
+
+	/**
+	 * @param VariableTypeHolder[] $variableTypeHolders
+	 * @param VariableTypeHolder[] $otherVariableTypeHolders
+	 * @return bool
+	 */
+	private function compareVariableTypeHolders(array $variableTypeHolders, array $otherVariableTypeHolders): bool
+	{
+		foreach ($variableTypeHolders as $name => $variableTypeHolder) {
+			if (!isset($otherVariableTypeHolders[$name])) {
+				return false;
+			}
+
+			if (!$variableTypeHolder->getCertainty()->equals($otherVariableTypeHolders[$name]->getCertainty())) {
+				return false;
+			}
+
+			if (!$variableTypeHolder->getType()->equals($otherVariableTypeHolders[$name]->getType())) {
+				return false;
+			}
+
+			unset($otherVariableTypeHolders[$name]);
+		}
+
+		return count($otherVariableTypeHolders) === 0;
 	}
 
 	public function canAccessProperty(PropertyReflection $propertyReflection): bool
