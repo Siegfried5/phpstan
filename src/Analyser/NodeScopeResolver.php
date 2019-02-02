@@ -661,6 +661,44 @@ class NodeScopeResolver
 			}
 
 			return new StatementResult($finalScope, $alwaysTerminatingStatements, []);
+		} elseif ($stmt instanceof Switch_) {
+			$scope = $this->processExprNode($stmt->cond, $scope, $nodeCallback, 1);
+			$finalScope = null;
+			$prevScope = null;
+			$hasDefaultCase = false;
+			foreach ($stmt->cases as $i => $caseNode) {
+				if ($caseNode->cond !== null) {
+					$condExpr = new BinaryOp\Equal($stmt->cond, $caseNode->cond);
+					$branchScope = $this->processExprNode($caseNode->cond, $scope, $nodeCallback, 1);
+					$branchScope = $branchScope->filterByTruthyValue($condExpr);
+					$scope = $scope->filterByFalseyValue($condExpr);
+				} else {
+					$hasDefaultCase = true;
+					$branchScope = $scope;
+					for ($j = $i + 1; $j < count($stmt->cases); $j++) {
+						$branchScope = $branchScope->filterByFalseyValue($stmt->cases[$j]->cond);
+					}
+				}
+
+				$branchScope = $branchScope->mergeWith($prevScope);
+				$branchScopeResult = $this->processStmtNodes($caseNode->stmts, $branchScope, $nodeCallback);
+				$branchScope = $branchScopeResult->getScope();
+				$prevScope = $branchScopeResult->isAlwaysTerminating() ? null : $branchScope;
+				$isLastCase = ($i === count($stmt->cases) - 1);
+				if ($branchScopeResult->isAlwaysTerminating() || ($isLastCase && !$branchScopeResult->isAlwaysTerminating())) {
+					$finalScope = $branchScope->mergeWith($finalScope);
+				}
+
+				// todo merge with break and continue
+			}
+
+			if (!$hasDefaultCase || $finalScope === null) {
+				$finalScope = $scope->mergeWith($finalScope);
+			}
+
+			// todo
+			// todo StatementResultTest
+			return new StatementResult($finalScope, [], []);
 		}
 
 		// todo Use_, Global_, Static_, StaticVar_, ClassConst_, Unset_
