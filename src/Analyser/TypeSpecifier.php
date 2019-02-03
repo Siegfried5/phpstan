@@ -19,6 +19,7 @@ use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Expr\StaticPropertyFetch;
 use PhpParser\Node\Name;
 use PHPStan\Broker\Broker;
+use PHPStan\ShouldNotHappenException;
 use PHPStan\Type\Accessory\HasOffsetType;
 use PHPStan\Type\Accessory\NonEmptyArrayType;
 use PHPStan\Type\ArrayType;
@@ -373,6 +374,10 @@ class TypeSpecifier
 				}
 			}
 
+			if (count($vars) === 0) {
+				throw new ShouldNotHappenException();
+			}
+
 			$types = null;
 			foreach ($vars as $var) {
 				if ($expr instanceof Expr\Isset_) {
@@ -407,9 +412,6 @@ class TypeSpecifier
 					$types = $types->unionWith($type);
 				}
 			}
-
-			/** @var SpecifiedTypes $types */
-			$types = $types;
 
 			if (
 				$expr instanceof Expr\Empty_

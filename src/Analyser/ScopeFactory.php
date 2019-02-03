@@ -49,6 +49,7 @@ class ScopeFactory
 	 * @param string|null $inClosureBindScopeClass
 	 * @param \PHPStan\Type\Type|null $inAnonymousFunctionReturnType
 	 * @param \PhpParser\Node\Expr\FuncCall|\PhpParser\Node\Expr\MethodCall|\PhpParser\Node\Expr\StaticCall|null $inFunctionCall
+	 * @param bool $negated
 	 * @param bool $inFirstLevelStatement
 	 * @param string[] $currentlyAssignedExpressions
 	 *
@@ -64,6 +65,7 @@ class ScopeFactory
 		?string $inClosureBindScopeClass = null,
 		?Type $inAnonymousFunctionReturnType = null,
 		?Expr $inFunctionCall = null,
+		bool $negated = false,
 		bool $inFirstLevelStatement = true,
 		array $currentlyAssignedExpressions = []
 	): Scope
@@ -87,6 +89,7 @@ class ScopeFactory
 			$inClosureBindScopeClass,
 			$inAnonymousFunctionReturnType,
 			$inFunctionCall,
+			$negated,
 			$inFirstLevelStatement,
 			$currentlyAssignedExpressions,
 			$this->dynamicConstantNames

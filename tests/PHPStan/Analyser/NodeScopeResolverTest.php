@@ -239,7 +239,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 			[
 				$testScope,
 				'foo',
-				TrinaryLogic::createYes(),
+				TrinaryLogic::createMaybe(),
 				'bool', // mixed?
 			],
 			[
@@ -340,7 +340,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 			[
 				$testScope,
 				'matches2',
-				TrinaryLogic::createYes(),
+				TrinaryLogic::createMaybe(),
 				'mixed',
 			],
 			[

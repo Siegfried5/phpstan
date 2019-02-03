@@ -2068,10 +2068,10 @@ class Scope implements ClassMemberAccessAnswerer
 	public function enterForeach(Expr $iteratee, string $valueName, ?string $keyName): self
 	{
 		$iterateeType = $this->getType($iteratee);
-		$scope = $this->assignVariable($valueName, $iterateeType->getIterableValueType(), TrinaryLogic::createYes());
+		$scope = $this->assignVariable($valueName, $iterateeType->getIterableValueType());
 
 		if ($keyName !== null) {
-			$scope = $scope->assignVariable($keyName, $iterateeType->getIterableKeyType(), TrinaryLogic::createYes());
+			$scope = $scope->assignVariable($keyName, $iterateeType->getIterableKeyType());
 		}
 
 		return $scope;
@@ -2090,8 +2090,7 @@ class Scope implements ClassMemberAccessAnswerer
 
 		return $this->assignVariable(
 			$variableName,
-			TypeCombinator::intersect($type, new ObjectType(\Throwable::class)),
-			TrinaryLogic::createYes()
+			TypeCombinator::intersect($type, new ObjectType(\Throwable::class))
 		);
 	}
 
@@ -2137,29 +2136,40 @@ class Scope implements ClassMemberAccessAnswerer
 		);
 	}
 
+	public function exitExpressionAssign(Expr $expr): self
+	{
+		// todo předělat na array keys
+		$exprString = $this->printer->prettyPrintExpr($expr);
+		$currentlyAssignedExpressions = array_values(array_filter($this->currentlyAssignedExpressions, function (string $evaluatedExprString) use ($exprString): bool {
+			return $evaluatedExprString !== $exprString;
+		}));
+
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$this->getVariableTypes(),
+			$this->moreSpecificTypes,
+			$this->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
+			$this->isNegated(),
+			$this->isInFirstLevelStatement(),
+			$currentlyAssignedExpressions
+		);
+	}
+
 	public function isInExpressionAssign(Expr $expr): bool
 	{
 		$exprString = $this->printer->prettyPrintExpr($expr);
 		return in_array($exprString, $this->currentlyAssignedExpressions, true);
 	}
 
-	public function assignVariable(
-		string $variableName,
-		Type $type,
-		TrinaryLogic $certainty
-	): self
+	public function assignVariable(string $variableName, Type $type): self
 	{
-		if ($certainty->no()) {
-			throw new \PHPStan\ShouldNotHappenException();
-		}
-
-		$existingCertainty = $this->hasVariableType($variableName);
-		if (!$existingCertainty->no()) {
-			$certainty = $certainty->or($existingCertainty);
-		}
-
 		$variableTypes = $this->getVariableTypes();
-		$variableTypes[$variableName] = new VariableTypeHolder($type, $certainty);
+		$variableTypes[$variableName] = new VariableTypeHolder($type, TrinaryLogic::createYes());
 
 		$variableString = $this->printer->prettyPrintExpr(new Variable($variableName));
 		$moreSpecificTypeHolders = $this->moreSpecificTypes;
@@ -2463,8 +2473,27 @@ class Scope implements ClassMemberAccessAnswerer
 			return $this;
 		}
 
-		$ourVariableTypeHolders = $this->getVariableTypes();
-		$theirVariableTypeHolders = $otherScope->getVariableTypes();
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$this->mergeVariableHolders($this->getVariableTypes(), $otherScope->getVariableTypes()),
+			$this->mergeVariableHolders($this->moreSpecificTypes, $otherScope->moreSpecificTypes),
+			$this->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
+			$this->inFirstLevelStatement
+		);
+	}
+
+	/**
+	 * @param VariableTypeHolder[] $ourVariableTypeHolders
+	 * @param VariableTypeHolder[] $theirVariableTypeHolders
+	 * @return VariableTypeHolder[]
+	 */
+	private function mergeVariableHolders(array $ourVariableTypeHolders, array $theirVariableTypeHolders): array
+	{
 		$intersectedVariableTypeHolders = [];
 		foreach ($ourVariableTypeHolders as $name => $variableTypeHolder) {
 			if (isset($theirVariableTypeHolders[$name])) {
@@ -2474,27 +2503,63 @@ class Scope implements ClassMemberAccessAnswerer
 			}
 		}
 
-		$ourMoreSpecificTypes = $this->moreSpecificTypes;
-		$theirMoreSpecificTypes = $otherScope->moreSpecificTypes;
-		$intersectedMoreSpecificTypes = [];
-		foreach ($ourMoreSpecificTypes as $exprString => $typeHolder) {
-			if (isset($theirMoreSpecificTypes[$exprString])) {
-				$intersectedMoreSpecificTypes[$exprString] = $typeHolder->and($theirMoreSpecificTypes[$exprString]);
+		foreach ($theirVariableTypeHolders as $name => $variableTypeHolder) {
+			if (isset($intersectedVariableTypeHolders[$name])) {
+				continue;
 			}
+
+			$intersectedVariableTypeHolders[$name] = VariableTypeHolder::createMaybe($variableTypeHolder->getType());
 		}
 
+		return $intersectedVariableTypeHolders;
+	}
+
+	public function processFinallyScope(self $finallyScope, self $originalFinallyScope): self
+	{
 		return $this->scopeFactory->create(
 			$this->context,
 			$this->isDeclareStrictTypes(),
 			$this->getFunction(),
 			$this->getNamespace(),
-			$intersectedVariableTypeHolders,
-			$intersectedMoreSpecificTypes,
+			$this->processFinallyScopeVariableTypeHolders(
+				$this->getVariableTypes(),
+				$finallyScope->getVariableTypes(),
+				$originalFinallyScope->getVariableTypes()
+			),
+			$this->processFinallyScopeVariableTypeHolders(
+				$this->moreSpecificTypes,
+				$finallyScope->moreSpecificTypes,
+				$originalFinallyScope->moreSpecificTypes
+			),
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
 			$this->inFirstLevelStatement
 		);
+	}
+
+	/**
+	 * @param VariableTypeHolder[] $ourVariableTypeHolders
+	 * @param VariableTypeHolder[] $finallyVariableTypeHolders
+	 * @param VariableTypeHolder[] $originalVariableTypeHolders
+	 * @return VariableTypeHolder[]
+	 */
+	private function processFinallyScopeVariableTypeHolders(
+		array $ourVariableTypeHolders,
+		array $finallyVariableTypeHolders,
+		array $originalVariableTypeHolders
+	): array
+	{
+		foreach ($finallyVariableTypeHolders as $name => $variableTypeHolder) {
+			if (
+				isset($originalVariableTypeHolders[$name])
+				&& !$originalVariableTypeHolders[$name]->getType()->equals($variableTypeHolder->getType())
+			) {
+				$ourVariableTypeHolders[$name] = $variableTypeHolder;
+			}
+		}
+
+		return $ourVariableTypeHolders;
 	}
 
 	public function generalizeWith(self $otherScope): self

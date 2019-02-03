@@ -42,12 +42,12 @@ class TypeSpecifierTest extends \PHPStan\Testing\TestCase
 		$this->typeSpecifier = $this->createTypeSpecifier($this->printer, $broker);
 		$this->scope = $this->createScopeFactory($broker, $this->typeSpecifier)->create(ScopeContext::create(''));
 		$this->scope = $this->scope->enterClass($broker->getClass('DateTime'));
-		$this->scope = $this->scope->assignVariable('bar', new ObjectType('Bar'), TrinaryLogic::createYes());
-		$this->scope = $this->scope->assignVariable('stringOrNull', new UnionType([new StringType(), new NullType()]), TrinaryLogic::createYes());
-		$this->scope = $this->scope->assignVariable('barOrNull', new UnionType([new ObjectType('Bar'), new NullType()]), TrinaryLogic::createYes());
-		$this->scope = $this->scope->assignVariable('stringOrFalse', new UnionType([new StringType(), new ConstantBooleanType(false)]), TrinaryLogic::createYes());
-		$this->scope = $this->scope->assignVariable('array', new ArrayType(new MixedType(), new MixedType()), TrinaryLogic::createYes());
-		$this->scope = $this->scope->assignVariable('foo', new MixedType(), TrinaryLogic::createYes());
+		$this->scope = $this->scope->assignVariable('bar', new ObjectType('Bar'));
+		$this->scope = $this->scope->assignVariable('stringOrNull', new UnionType([new StringType(), new NullType()]));
+		$this->scope = $this->scope->assignVariable('barOrNull', new UnionType([new ObjectType('Bar'), new NullType()]));
+		$this->scope = $this->scope->assignVariable('stringOrFalse', new UnionType([new StringType(), new ConstantBooleanType(false)]));
+		$this->scope = $this->scope->assignVariable('array', new ArrayType(new MixedType(), new MixedType()));
+		$this->scope = $this->scope->assignVariable('foo', new MixedType());
 	}
 
 	/**
