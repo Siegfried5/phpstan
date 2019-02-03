@@ -356,6 +356,10 @@ class Scope implements ClassMemberAccessAnswerer
 
 	private function resolveType(Expr $node): Type
 	{
+		if ($node instanceof Expr\Exit_) {
+			return new NeverType();
+		}
+
 		if (
 			$node instanceof Expr\BinaryOp\Greater
 			|| $node instanceof Expr\BinaryOp\GreaterOrEqual
@@ -1025,7 +1029,7 @@ class Scope implements ClassMemberAccessAnswerer
 				return new ObjectType((string) $node->class);
 			}
 			if ($node->class instanceof Node\Stmt\Class_) {
-				$anonymousClassReflection = $this->broker->getAnonymousClassReflection($node, $this);
+				$anonymousClassReflection = $this->broker->getAnonymousClassReflection($node->class, $this);
 
 				return new ObjectType($anonymousClassReflection->getName());
 			}
@@ -2227,272 +2231,6 @@ class Scope implements ClassMemberAccessAnswerer
 		return $this;
 	}
 
-	public function intersectVariables(Scope $otherScope): self
-	{
-		$ourVariableTypeHolders = $this->getVariableTypes();
-		$theirVariableTypeHolders = $otherScope->getVariableTypes();
-		$intersectedVariableTypeHolders = [];
-		foreach ($theirVariableTypeHolders as $name => $variableTypeHolder) {
-			if (isset($ourVariableTypeHolders[$name])) {
-				$intersectedVariableTypeHolders[$name] = $ourVariableTypeHolders[$name]->and($variableTypeHolder);
-			} else {
-				$intersectedVariableTypeHolders[$name] = VariableTypeHolder::createMaybe($variableTypeHolder->getType());
-			}
-		}
-
-		foreach ($ourVariableTypeHolders as $name => $variableTypeHolder) {
-			$variableNode = new Variable($name);
-			if ($otherScope->isSpecified($variableNode)) {
-				$intersectedVariableTypeHolders[$name] = VariableTypeHolder::createYes(
-					TypeCombinator::union(
-						$otherScope->getType($variableNode),
-						$variableTypeHolder->getType()
-					)
-				);
-				continue;
-			}
-			if (isset($theirVariableTypeHolders[$name])) {
-				continue;
-			}
-
-			$intersectedVariableTypeHolders[$name] = VariableTypeHolder::createMaybe($variableTypeHolder->getType());
-		}
-
-		$ourSpecifiedTypeHolders = $this->moreSpecificTypes;
-		$theirSpecifiedTypeHolders = $otherScope->moreSpecificTypes;
-		$intersectedSpecifiedTypes = [];
-
-		foreach ($theirSpecifiedTypeHolders as $exprString => $theirSpecifiedTypeHolder) {
-			$matches = \Nette\Utils\Strings::match((string) $exprString, '#^\$([a-zA-Z_\x7f-\xff][a-zA-Z_0-9\x7f-\xff]*)$#');
-			if ($matches !== null) {
-				continue;
-			}
-			if (isset($ourSpecifiedTypeHolders[$exprString])) {
-				$intersectedSpecifiedTypes[$exprString] = $ourSpecifiedTypeHolders[$exprString]->and($theirSpecifiedTypeHolder);
-			} else {
-				$intersectedSpecifiedTypes[$exprString] = VariableTypeHolder::createMaybe($theirSpecifiedTypeHolder->getType());
-			}
-		}
-
-		foreach ($this->moreSpecificTypes as $exprString => $specificTypeHolder) {
-			$matches = \Nette\Utils\Strings::match((string) $exprString, '#^\$([a-zA-Z_\x7f-\xff][a-zA-Z_0-9\x7f-\xff]*)$#');
-			if ($matches !== null) {
-				continue;
-			}
-			if (isset($otherScope->moreSpecificTypes[$exprString])) {
-				$intersectedSpecifiedTypes[$exprString] = VariableTypeHolder::createYes(
-					TypeCombinator::union(
-						$otherScope->moreSpecificTypes[$exprString]->getType(),
-						$specificTypeHolder->getType()
-					)
-				);
-				continue;
-			}
-			if (isset($theirVariableTypeHolders[$exprString])) {
-				continue;
-			}
-
-			$intersectedSpecifiedTypes[$exprString] = VariableTypeHolder::createMaybe($specificTypeHolder->getType());
-		}
-
-		return $this->scopeFactory->create(
-			$this->context,
-			$this->isDeclareStrictTypes(),
-			$this->getFunction(),
-			$this->getNamespace(),
-			$intersectedVariableTypeHolders,
-			$intersectedSpecifiedTypes,
-			$this->inClosureBindScopeClass,
-			$this->getAnonymousFunctionReturnType(),
-			$this->getInFunctionCall(),
-			$this->isNegated(),
-			$this->inFirstLevelStatement
-		);
-	}
-
-	public function createIntersectedScope(self $otherScope): self
-	{
-		$variableTypes = [];
-		foreach ($otherScope->getVariableTypes() as $name => $variableTypeHolder) {
-			$variableTypes[$name] = $variableTypeHolder;
-		}
-
-		$specifiedTypes = [];
-		foreach ($otherScope->moreSpecificTypes as $exprString => $specificTypeHolder) {
-			$matches = \Nette\Utils\Strings::match((string) $exprString, '#^\$([a-zA-Z_\x7f-\xff][a-zA-Z_0-9\x7f-\xff]*)$#');
-			if ($matches !== null) {
-				$variableTypes[$matches[1]] = $specificTypeHolder;
-				continue;
-			}
-			$specifiedTypes[$exprString] = $specificTypeHolder;
-		}
-
-		return $this->scopeFactory->create(
-			$this->context,
-			$this->isDeclareStrictTypes(),
-			$this->getFunction(),
-			$this->getNamespace(),
-			$variableTypes,
-			$specifiedTypes,
-			$this->inClosureBindScopeClass,
-			$this->getAnonymousFunctionReturnType(),
-			$this->getInFunctionCall(),
-			$this->isNegated(),
-			$this->inFirstLevelStatement
-		);
-	}
-
-	public function mergeWithIntersectedScope(self $intersectedScope): self
-	{
-		$variableTypeHolders = $this->variableTypes;
-		$specifiedTypeHolders = $this->moreSpecificTypes;
-		foreach ($intersectedScope->getVariableTypes() as $name => $theirVariableTypeHolder) {
-			if (isset($variableTypeHolders[$name])) {
-				$type = $theirVariableTypeHolder->getType();
-				if ($theirVariableTypeHolder->getCertainty()->maybe()) {
-					$type = TypeCombinator::union($type, $variableTypeHolders[$name]->getType());
-				}
-				$theirVariableTypeHolder = new VariableTypeHolder(
-					$type,
-					$theirVariableTypeHolder->getCertainty()->or($variableTypeHolders[$name]->getCertainty())
-				);
-			}
-
-			$variableTypeHolders[$name] = $theirVariableTypeHolder;
-
-			$exprString = $this->printer->prettyPrintExpr(new Variable($name));
-			unset($specifiedTypeHolders[$exprString]);
-		}
-
-		foreach ($intersectedScope->moreSpecificTypes as $exprString => $theirTypeHolder) {
-			if (isset($specifiedTypeHolders[$exprString])) {
-				$type = $theirTypeHolder->getType();
-				if ($theirTypeHolder->getCertainty()->maybe()) {
-					$type = TypeCombinator::union($type, $specifiedTypeHolders[$exprString]->getType());
-				}
-				$theirTypeHolder = new VariableTypeHolder(
-					$type,
-					$theirTypeHolder->getCertainty()->or($specifiedTypeHolders[$exprString]->getCertainty())
-				);
-			}
-
-			if (!$theirTypeHolder->getCertainty()->yes()) {
-				continue;
-			}
-
-			$specifiedTypeHolders[$exprString] = $theirTypeHolder;
-		}
-
-		return $this->scopeFactory->create(
-			$this->context,
-			$this->isDeclareStrictTypes(),
-			$this->getFunction(),
-			$this->getNamespace(),
-			$variableTypeHolders,
-			$specifiedTypeHolders,
-			$this->inClosureBindScopeClass,
-			$this->getAnonymousFunctionReturnType(),
-			$this->getInFunctionCall(),
-			$this->isNegated(),
-			$this->inFirstLevelStatement
-		);
-	}
-
-	public function removeSpecified(self $initialScope): self
-	{
-		$variableTypeHolders = $this->variableTypes;
-		foreach ($variableTypeHolders as $name => $holder) {
-			if (!$holder->getCertainty()->yes()) {
-				continue;
-			}
-			$node = new Variable($name);
-			if ($this->isSpecified($node) && !$initialScope->hasVariableType($name)->no()) {
-				$variableTypeHolders[$name] = VariableTypeHolder::createYes(TypeCombinator::remove($initialScope->getVariableType($name), $this->getType($node)));
-				continue;
-			}
-		}
-
-		$moreSpecificTypeHolders = $this->moreSpecificTypes;
-		foreach (array_keys($moreSpecificTypeHolders) as $exprString) {
-			if (isset($initialScope->moreSpecificTypes[$exprString])) {
-				continue;
-			}
-
-			unset($moreSpecificTypeHolders[$exprString]);
-		}
-
-		return $this->scopeFactory->create(
-			$this->context,
-			$this->isDeclareStrictTypes(),
-			$this->getFunction(),
-			$this->getNamespace(),
-			$variableTypeHolders,
-			$moreSpecificTypeHolders,
-			$this->inClosureBindScopeClass,
-			$this->getAnonymousFunctionReturnType(),
-			$this->getInFunctionCall(),
-			$this->isNegated(),
-			$this->inFirstLevelStatement
-		);
-	}
-
-	public function removeVariables(self $otherScope, bool $all): self
-	{
-		$ourVariableTypeHolders = $this->getVariableTypes();
-		foreach ($otherScope->getVariableTypes() as $name => $theirVariableTypeHolder) {
-			if ($all) {
-				if (
-					isset($ourVariableTypeHolders[$name])
-					&& $ourVariableTypeHolders[$name]->getCertainty()->equals($theirVariableTypeHolder->getCertainty())
-				) {
-					unset($ourVariableTypeHolders[$name]);
-				}
-			} else {
-				if (
-					isset($ourVariableTypeHolders[$name])
-					&& $theirVariableTypeHolder->getType()->equals($ourVariableTypeHolders[$name]->getType())
-					&& $ourVariableTypeHolders[$name]->getCertainty()->equals($theirVariableTypeHolder->getCertainty())
-				) {
-					unset($ourVariableTypeHolders[$name]);
-				}
-			}
-		}
-
-		$ourTypeHolders = $this->moreSpecificTypes;
-		foreach ($otherScope->moreSpecificTypes as $exprString => $theirTypeHolder) {
-			if ($all) {
-				if (
-					isset($ourTypeHolders[$exprString])
-					&& $ourTypeHolders[$exprString]->getCertainty()->equals($theirTypeHolder->getCertainty())
-				) {
-					unset($ourVariableTypeHolders[$exprString]);
-				}
-			} else {
-				if (
-					isset($ourTypeHolders[$exprString])
-					&& $theirTypeHolder->getType()->equals($ourTypeHolders[$exprString]->getType())
-					&& $ourTypeHolders[$exprString]->getCertainty()->equals($theirTypeHolder->getCertainty())
-				) {
-					unset($ourVariableTypeHolders[$exprString]);
-				}
-			}
-		}
-
-		return $this->scopeFactory->create(
-			$this->context,
-			$this->isDeclareStrictTypes(),
-			$this->getFunction(),
-			$this->getNamespace(),
-			$ourVariableTypeHolders,
-			$ourTypeHolders,
-			$this->inClosureBindScopeClass,
-			$this->getAnonymousFunctionReturnType(),
-			$this->getInFunctionCall(),
-			$this->isNegated(),
-			$this->inFirstLevelStatement
-		);
-	}
-
 	public function specifyExpressionType(Expr $expr, Type $type): self
 	{
 		if ($expr instanceof Node\Scalar || $expr instanceof Array_) {
@@ -2726,7 +2464,49 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
-			$this->isNegated(),
+			$this->inFirstLevelStatement
+		);
+	}
+
+	public function mergeWith(?self $otherScope): self
+	{
+		if ($otherScope === null) {
+			return $this;
+		}
+
+		$ourVariableTypeHolders = $this->getVariableTypes();
+		$theirVariableTypeHolders = $otherScope->getVariableTypes();
+		$intersectedVariableTypeHolders = [];
+		foreach ($ourVariableTypeHolders as $name => $variableTypeHolder) {
+			if (isset($theirVariableTypeHolders[$name])) {
+				$intersectedVariableTypeHolders[$name] = $variableTypeHolder->and($theirVariableTypeHolders[$name]);
+			} else {
+				$intersectedVariableTypeHolders[$name] = VariableTypeHolder::createMaybe($variableTypeHolder->getType());
+			}
+		}
+
+		$moreSpecificTypes = [];
+		$specifiedTypesIntersection = array_intersect_key($this->moreSpecificTypes, $otherScope->moreSpecificTypes);
+		foreach ($specifiedTypesIntersection as $exprString => $type) {
+			if (!$this->moreSpecificTypes[$exprString]->getType()->equals($otherScope->moreSpecificTypes[$exprString]->getType())) {
+				continue;
+			}
+
+			// todo udelat z moreSpecificTypes opet jen Type[]
+
+			$moreSpecificTypes[$exprString] = $this->moreSpecificTypes[$exprString];
+		}
+
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$intersectedVariableTypeHolders,
+			$moreSpecificTypes,
+			$this->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
 			$this->inFirstLevelStatement
 		);
 	}
