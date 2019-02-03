@@ -178,7 +178,7 @@ class NodeScopeResolver
 			if ($statementResult->isAlwaysTerminating()) {
 				// todo virtual dead code node
 				// todo test various pollute* settings
-				break;
+				//break;
 			}
 
 			$scope = $statementResult->getScope();
@@ -198,21 +198,19 @@ class NodeScopeResolver
 	): StatementResult
 	{
 		$exitPoints = [];
+		$alwaysTerminatingStatements = [];
 		foreach ($stmts as $stmt) {
 			$statementResult = $this->processStmtNode($stmt, $scope, $nodeCallback);
 			$exitPoints = array_merge($exitPoints, $statementResult->getExitPoints());
+
 			if ($statementResult->isAlwaysTerminating()) {
-				return new StatementResult(
-					$statementResult->getScope(),
-					$statementResult->getAlwaysTerminatingStatements(),
-					$exitPoints
-				);
+				$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $statementResult->getAlwaysTerminatingStatements());
 			}
 
 			$scope = $statementResult->getScope();
 		}
 
-		return new StatementResult($scope, [], $exitPoints);
+		return new StatementResult($scope, $alwaysTerminatingStatements, $exitPoints);
 	}
 
 	/**
