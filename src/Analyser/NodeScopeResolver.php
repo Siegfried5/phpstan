@@ -699,6 +699,62 @@ class NodeScopeResolver
 			// todo
 			// todo StatementResultTest
 			return new StatementResult($finalScope, [], []);
+		} elseif ($stmt instanceof TryCatch) {
+			// todo polluteCatchScopeWithTryAssignments
+			$branchScopeResult = $this->processStmtNodes($stmt->stmts, $scope, $nodeCallback);
+			$branchScope = $branchScopeResult->getScope();
+			$tryScope = $branchScope;
+			$exitPoints = [];
+			$alwaysTerminatingStatements = [];
+			$finalScope = $branchScopeResult->isAlwaysTerminating() ? null : $branchScope;
+			if ($branchScopeResult->isAlwaysTerminating()) {
+				$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeResult->getAlwaysTerminatingStatements());
+			}
+			$finallyScope = $branchScope;
+			foreach ($branchScopeResult->getExitPoints() as $exitPoint) {
+				$finallyScope = $finallyScope->mergeWith($exitPoint->getScope());
+				$exitPoints[] = $exitPoint;
+			}
+
+			foreach ($stmt->catches as $catchNode) {
+				$nodeCallback($catchNode, $scope);
+
+				$catchScope = $scope;
+				if ($this->polluteCatchScopeWithTryAssignments) {
+					$catchScope = $tryScope;
+				}
+
+				if (!is_string($catchNode->var->name)) {
+					throw new \PHPStan\ShouldNotHappenException();
+				}
+
+				$catchScope = $catchScope->enterCatch($catchNode->types, $catchNode->var->name);
+				$catchScopeResult = $this->processStmtNodes($catchNode->stmts, $catchScope, $nodeCallback);
+				$catchScope = $catchScopeResult->getScope();
+				$finalScope = $catchScopeResult->isAlwaysTerminating() ? $finalScope : $catchScope->mergeWith($finalScope);
+				if ($catchScopeResult->isAlwaysTerminating()) {
+					$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $catchScopeResult->getAlwaysTerminatingStatements());
+				}
+				foreach ($catchScopeResult->getExitPoints() as $exitPoint) {
+					$finallyScope = $finallyScope->mergeWith($exitPoint->getScope());
+					$exitPoints[] = $exitPoint;
+				}
+			}
+
+			if ($stmt->finally !== null) {
+				$finallyResult = $this->processStmtNodes($stmt->finally->stmts, $finallyScope, $nodeCallback);
+				$finallyScope = $finallyResult->getScope();
+				$finalScope = $finallyResult->isAlwaysTerminating() ? $finalScope : $finallyScope->mergeWith($finalScope);
+				if ($finallyResult->isAlwaysTerminating()) {
+					$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $finallyResult->getAlwaysTerminatingStatements());
+				}
+			}
+
+			if ($finalScope === null) {
+				$finalScope = $scope;
+			}
+
+			return new StatementResult($finalScope, $alwaysTerminatingStatements, $exitPoints);
 		}
 
 		// todo Use_, Global_, Static_, StaticVar_, ClassConst_, Unset_
@@ -1037,9 +1093,7 @@ class NodeScopeResolver
 		Type $subNodeType
 	): Scope
 	{
-		$scope = $scope->enterExpressionAssign($var);
-		$varScope = $this->processExprNode($var, $scope, $nodeCallback, 1);
-		// nepodchytí je ->processExprNode nad voláním ->assignVariable?
+		$this->processExprNode($var, $scope->enterExpressionAssign($var), $nodeCallback, 1);
 		if ($var instanceof Variable && is_string($var->name)) {
 			$scope = $scope->assignVariable($var->name, $subNodeType, $certainty);
 		} elseif ($var instanceof ArrayDimFetch) {
@@ -1113,8 +1167,6 @@ class NodeScopeResolver
 			$scope = $scope->specifyExpressionType($var, $subNodeType);
 		} elseif ($var instanceof Expr\StaticPropertyFetch) {
 			$scope = $scope->specifyExpressionType($var, $subNodeType);
-		} else {
-			$scope = $varScope;
 		}
 
 		return $scope;
