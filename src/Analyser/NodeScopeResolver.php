@@ -371,8 +371,9 @@ class NodeScopeResolver
 			$alwaysTerminatingStatements = [];
 			$alwaysTerminating = true;
 
+			$branchScopeStatementResult = $this->processStmtNodes($stmt->stmts, $scope->filterByTruthyValue($stmt->cond), $nodeCallback);
+
 			if (!$conditionType instanceof ConstantBooleanType || $conditionType->getValue()) {
-				$branchScopeStatementResult = $this->processStmtNodes($stmt->stmts, $scope->filterByTruthyValue($stmt->cond), $nodeCallback);
 				$exitPoints = $branchScopeStatementResult->getExitPoints();
 				$branchScope = $branchScopeStatementResult->getScope();
 				$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? null : $branchScope;
@@ -388,20 +389,18 @@ class NodeScopeResolver
 
 				foreach ($stmt->elseifs as $elseif) {
 					$elseIfConditionType = $scope->getType($elseif->cond)->toBoolean();
-					if (
-						$elseIfConditionType instanceof ConstantBooleanType
-						&& !$elseIfConditionType->getValue()
-					) {
-						continue;
-					}
 					$scope = $this->processExprNode($elseif->cond, $scope, $nodeCallback, 1);
 					$branchScopeStatementResult = $this->processStmtNodes($elseif->stmts, $scope->filterByTruthyValue($elseif->cond), $nodeCallback);
-					$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
-					$branchScope = $branchScopeStatementResult->getScope();
-					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
-					$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
-					if ($branchScopeStatementResult->isAlwaysTerminating()) {
-						$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
+
+					if (!$lastElseIfConditionIsTrue && (!$elseIfConditionType instanceof ConstantBooleanType
+						|| $elseIfConditionType->getValue())) {
+						$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
+						$branchScope = $branchScopeStatementResult->getScope();
+						$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
+						$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
+						if ($branchScopeStatementResult->isAlwaysTerminating()) {
+							$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
+						}
 					}
 
 					if (
@@ -409,7 +408,6 @@ class NodeScopeResolver
 						&& $elseIfConditionType->getValue()
 					) {
 						$lastElseIfConditionIsTrue = true;
-						break;
 					}
 
 					$scope = $scope->filterByFalseyValue($elseif->cond);
@@ -418,14 +416,17 @@ class NodeScopeResolver
 				if ($stmt->else === null) {
 					$finalScope = $scope->mergeWith($finalScope);
 					$alwaysTerminating = false;
-				} elseif (!$lastElseIfConditionIsTrue) {
+				} else {
 					$branchScopeStatementResult = $this->processStmtNodes($stmt->else->stmts, $scope, $nodeCallback);
-					$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
-					$branchScope = $branchScopeStatementResult->getScope();
-					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
-					$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
-					if ($branchScopeStatementResult->isAlwaysTerminating()) {
-						$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
+
+					if (!$lastElseIfConditionIsTrue) {
+						$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
+						$branchScope = $branchScopeStatementResult->getScope();
+						$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
+						$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
+						if ($branchScopeStatementResult->isAlwaysTerminating()) {
+							$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
+						}
 					}
 				}
 			}
@@ -823,7 +824,9 @@ class NodeScopeResolver
 	 */
 	private function processExprNode(Expr $expr, Scope $scope, \Closure $nodeCallback, $depth): Scope
 	{
-		if ($depth > 0) {
+		if ($depth === 0 && !$scope->isInFirstLevelStatement()) {
+			$scope = $scope->enterFirstLevelStatements();
+		} elseif ($depth > 0 && $scope->isInFirstLevelStatement()) {
 			$scope = $scope->exitFirstLevelStatements();
 		}
 
@@ -975,12 +978,12 @@ class NodeScopeResolver
 			$scope = $this->processExprNode($expr->value, $scope, $nodeCallback, $depth + 1);
 		} elseif ($expr instanceof BooleanAnd || $expr instanceof BinaryOp\LogicalAnd) {
 			$leftScope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
-			$rightScope = $this->processExprNode($expr->right, $scope->filterByTruthyValue($expr->left), $nodeCallback, $depth + 1);
+			$rightScope = $this->processExprNode($expr->right, $scope->filterByTruthyValue($expr->left), $nodeCallback, $depth);
 
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always false
 		} elseif ($expr instanceof BooleanOr || $expr instanceof BinaryOp\LogicalOr) {
-			$leftScope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
+			$leftScope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth);
 			$rightScope = $this->processExprNode($expr->right, $scope->filterByFalseyValue($expr->left), $nodeCallback, $depth + 1);
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always true
@@ -1099,10 +1102,6 @@ class NodeScopeResolver
 			if ($expr->value !== null) {
 				$scope = $this->processExprNode($expr->value, $scope, $nodeCallback, $depth + 1);
 			}
-		}
-
-		if ($depth === 0) {
-			$scope = $scope->enterFirstLevelStatements();
 		}
 
 		return $scope;
