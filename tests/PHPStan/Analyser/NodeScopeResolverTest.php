@@ -6900,6 +6900,21 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				'$nullableVal',
 				"'afterLoop'",
 			],
+			[
+				'LoopVariables\Foo|false',
+				'$falseOrObject',
+				"'begin'",
+			],
+			[
+				'LoopVariables\Foo',
+				'$falseOrObject',
+				"'end'",
+			],
+			[
+				'LoopVariables\Foo|false',
+				'$falseOrObject',
+				"'afterLoop'",
+			],
 		];
 	}
 
@@ -7098,6 +7113,36 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 			[
 				'int',
 				'$nullableVal',
+				"'afterLoop'",
+			],
+			[
+				'LoopVariables\Foo|false',
+				'$falseOrObject',
+				"'begin'",
+			],
+			[
+				'LoopVariables\Foo',
+				'$falseOrObject',
+				"'end'",
+			],
+			[
+				'LoopVariables\Foo|false',
+				'$falseOrObject',
+				"'afterLoop'",
+			],
+			[
+				'LoopVariables\Foo|false',
+				'$anotherFalseOrObject',
+				"'begin'",
+			],
+			[
+				'LoopVariables\Foo',
+				'$anotherFalseOrObject',
+				"'end'",
+			],
+			[
+				'LoopVariables\Foo',
+				'$anotherFalseOrObject',
 				"'afterLoop'",
 			],
 		];

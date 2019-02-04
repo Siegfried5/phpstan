@@ -70,7 +70,7 @@ class AccessPropertiesRule implements \PHPStan\Rules\Rule
 		}
 
 		if (!$type->hasProperty($name)->yes()) {
-			if ($scope->isSpecified($node)) {
+			if ($scope->isSpecified($node) || $scope->isInExpressionAssign($node)) {
 				return [];
 			}
 

@@ -151,7 +151,7 @@ class AccessStaticPropertiesRule implements \PHPStan\Rules\Rule
 		}
 
 		if (!$classType->hasProperty($name)->yes()) {
-			if ($scope->isSpecified($node)) {
+			if ($scope->isSpecified($node) || $scope->isInExpressionAssign($node)) {
 				return $messages;
 			}
 

@@ -108,13 +108,13 @@ class StatementResultTest extends \PHPStan\Testing\TestCase
 	): void
 	{
 		/** @var Parser $parser */
-		$parser = $this->getContainer()->getByType(Parser::class);
+		$parser = self::getContainer()->getByType(Parser::class);
 		$stmts = $parser->parseString(sprintf('<?php %s', $code));
 
 		/** @var NodeScopeResolver $nodeScopeResolver */
-		$nodeScopeResolver = $this->getContainer()->getByType(NodeScopeResolver::class);
+		$nodeScopeResolver = self::getContainer()->getByType(NodeScopeResolver::class);
 		/** @var ScopeFactory $scopeFactory */
-		$scopeFactory = $this->getContainer()->getByType(ScopeFactory::class);
+		$scopeFactory = self::getContainer()->getByType(ScopeFactory::class);
 		$result = $nodeScopeResolver->processStmtNodes(
 			$stmts,
 			$scopeFactory->create(ScopeContext::create('test.php')),
