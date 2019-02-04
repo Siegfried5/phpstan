@@ -983,8 +983,8 @@ class NodeScopeResolver
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always false
 		} elseif ($expr instanceof BooleanOr || $expr instanceof BinaryOp\LogicalOr) {
-			$leftScope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth);
-			$rightScope = $this->processExprNode($expr->right, $scope->filterByFalseyValue($expr->left), $nodeCallback, $depth + 1);
+			$leftScope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
+			$rightScope = $this->processExprNode($expr->right, $scope->filterByFalseyValue($expr->left), $nodeCallback, $depth);
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always true
 		} elseif ($expr instanceof Coalesce) {
@@ -1085,10 +1085,10 @@ class NodeScopeResolver
 			$ifFalseScope = $scope->filterByFalseyValue($expr->cond);
 
 			if ($expr->if !== null) {
-				$ifTrueScope = $this->processExprNode($expr->if, $ifTrueScope, $nodeCallback, $depth + 1);
-				$ifFalseScope = $this->processExprNode($expr->else, $ifFalseScope, $nodeCallback, $depth + 1);
+				$ifTrueScope = $this->processExprNode($expr->if, $ifTrueScope, $nodeCallback, $depth);
+				$ifFalseScope = $this->processExprNode($expr->else, $ifFalseScope, $nodeCallback, $depth);
 			} else {
-				$ifFalseScope = $this->processExprNode($expr->else, $ifFalseScope, $nodeCallback, $depth + 1);
+				$ifFalseScope = $this->processExprNode($expr->else, $ifFalseScope, $nodeCallback, $depth);
 			}
 
 			return $ifTrueScope->mergeWith($ifFalseScope);
