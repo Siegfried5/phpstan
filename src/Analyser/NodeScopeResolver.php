@@ -777,9 +777,44 @@ class NodeScopeResolver
 				$scope = $scope->exitExpressionAssign($var);
 				$scope = $scope->unsetExpression($var);
 			}
+		} elseif ($stmt instanceof Node\Stmt\Use_) {
+			foreach ($stmt->uses as $use) {
+				$this->processStmtNode($use, $scope, $nodeCallback);
+			}
+		} elseif ($stmt instanceof Node\Stmt\Global_) {
+			foreach ($stmt->vars as $var) {
+				if (!$var instanceof Variable) {
+					throw new ShouldNotHappenException();
+				}
+				if (!is_string($var->name)) {
+					throw new ShouldNotHappenException();
+				}
+				$scope = $scope->enterExpressionAssign($var);
+				$this->processExprNode($var, $scope, $nodeCallback, 1);
+				$scope = $scope->exitExpressionAssign($var);
+				$scope = $scope->assignVariable($var->name, new MixedType());
+			}
+		} elseif ($stmt instanceof Static_) {
+			foreach ($stmt->vars as $var) {
+				$scope = $this->processStmtNode($var, $scope, $nodeCallback)->getScope();
+			}
+		} elseif ($stmt instanceof StaticVar) {
+			if (!is_string($stmt->var->name)) {
+				throw new ShouldNotHappenException();
+			}
+			if ($stmt->default !== null) {
+				$this->processExprNode($stmt->default, $scope, $nodeCallback, 1);
+			}
+			$scope = $scope->enterExpressionAssign($stmt->var);
+			$this->processExprNode($stmt->var, $scope, $nodeCallback, 1);
+			$scope = $scope->exitExpressionAssign($stmt->var);
+			$scope = $scope->assignVariable($stmt->var->name, new MixedType());
+		} elseif ($stmt instanceof Node\Stmt\Const_ || $stmt instanceof Node\Stmt\ClassConst) {
+			foreach ($stmt->consts as $const) {
+				$nodeCallback($const, $scope);
+				$this->processExprNode($const->value, $scope, $nodeCallback, 1);
+			}
 		}
-
-		// todo Use_, Global_, Static_, StaticVar_, ClassConst_
 
 		return new StatementResult($scope, [], []);
 	}
@@ -958,8 +993,16 @@ class NodeScopeResolver
 				$this->processParamNode($param, $scope, $nodeCallback);
 			}
 
+			$byRefUses = [];
 			foreach ($expr->uses as $use) {
+				if ($use->byRef) {
+					$byRefUses[] = $use;
+					$scope = $scope->enterExpressionAssign($use->var);
+				}
 				$this->processExprNode($use, $scope, $nodeCallback, $depth);
+				if ($use->byRef) {
+					$scope = $scope->exitExpressionAssign($use->var);
+				}
 			}
 
 			if ($expr->returnType !== null) {
@@ -967,7 +1010,27 @@ class NodeScopeResolver
 			}
 
 			$closureScope = $scope->enterAnonymousFunction($expr);
-			$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
+			if (count($byRefUses) === 0) {
+				$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
+			} else {
+				$prevScope = $closureScope;
+				$closureScope = $closureScope->enterAnonymousFunction($expr);
+				$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, function (): void {
+
+				});
+				$intermediaryClosureScope = $intermediaryClosureScopeResult->getScope();
+				foreach ($intermediaryClosureScopeResult->getExitPoints() as $exitPoint) {
+					$intermediaryClosureScope = $intermediaryClosureScope->mergeWith($exitPoint->getScope());
+				}
+				$closureScope = $closureScope->processIntermediaryClosureScope($intermediaryClosureScope, $byRefUses);
+				if (!$closureScope->equals($prevScope)) {
+					$closureScope = $closureScope->generalizeWith($prevScope);
+				}
+
+				$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
+
+				$scope = $scope->processIntermediaryClosureScope($closureScope, $byRefUses);
+			}
 		} elseif ($expr instanceof Expr\ClosureUse) {
 			$this->processExprNode($expr->var, $scope, $nodeCallback, $depth);
 		} elseif ($expr instanceof ErrorSuppress) {

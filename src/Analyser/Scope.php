@@ -34,6 +34,7 @@ use PHPStan\Reflection\PassedByReference;
 use PHPStan\Reflection\Php\PhpFunctionFromParserNodeReflection;
 use PHPStan\Reflection\Php\PhpMethodFromParserNodeReflection;
 use PHPStan\Reflection\PropertyReflection;
+use PHPStan\ShouldNotHappenException;
 use PHPStan\TrinaryLogic;
 use PHPStan\Type\ArrayType;
 use PHPStan\Type\BenevolentUnionType;
@@ -2463,6 +2464,7 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
+			$this->isNegated(),
 			$this->inFirstLevelStatement
 		);
 	}
@@ -2483,6 +2485,7 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
+			$this->isNegated(),
 			$this->inFirstLevelStatement
 		);
 	}
@@ -2534,6 +2537,7 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
+			$this->isNegated(),
 			$this->inFirstLevelStatement
 		);
 	}
@@ -2562,6 +2566,43 @@ class Scope implements ClassMemberAccessAnswerer
 		return $ourVariableTypeHolders;
 	}
 
+	/**
+	 * @param self $intermediaryClosureScope
+	 * @param Expr\ClosureUse[] $byRefUses
+	 * @return self
+	 */
+	public function processIntermediaryClosureScope(self $intermediaryClosureScope, array $byRefUses): self
+	{
+		$variableTypes = $this->variableTypes;
+		foreach ($byRefUses as $use) {
+			if (!is_string($use->var->name)) {
+				throw new ShouldNotHappenException();
+			}
+
+			$variableName = $use->var->name;
+
+			if (!$intermediaryClosureScope->hasVariableType($variableName)->yes()) {
+				continue;
+			}
+
+			$variableTypes[$variableName] = VariableTypeHolder::createYes($intermediaryClosureScope->getVariableType($variableName));
+		}
+
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$variableTypes,
+			[],
+			$this->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
+			$this->isNegated(),
+			$this->inFirstLevelStatement
+		);
+	}
+
 	public function generalizeWith(self $otherScope): self
 	{
 		$variableTypeHolders = $this->generalizeVariableTypeHolders(
@@ -2584,6 +2625,7 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->inClosureBindScopeClass,
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
+			$this->isNegated(),
 			$this->inFirstLevelStatement
 		);
 	}

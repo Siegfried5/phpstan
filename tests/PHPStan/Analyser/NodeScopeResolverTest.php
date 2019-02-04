@@ -7489,6 +7489,26 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				'$untouchedPassedByRef',
 				"'afterCallback'",
 			],
+			[
+				'1',
+				'$incrementedInside',
+				"'beforeCallback'",
+			],
+			[
+				'int',
+				'$incrementedInside',
+				"'inCallbackBeforeAssign'",
+			],
+			[
+				'int',
+				'$incrementedInside',
+				"'inCallbackAfterAssign'",
+			],
+			[
+				'int',
+				'$incrementedInside',
+				"'afterCallback'",
+			],
 		];
 	}
 
