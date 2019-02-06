@@ -1958,19 +1958,15 @@ class Scope implements ClassMemberAccessAnswerer
 			if (!is_string($use->var->name)) {
 				throw new \PHPStan\ShouldNotHappenException();
 			}
-			if ($this->hasVariableType($use->var->name)->no()) {
-				if ($use->byRef) {
-					if ($this->isInExpressionAssign(new Variable($use->var->name))) {
-						$variableTypes[$use->var->name] = VariableTypeHolder::createYes(
-							$this->getType($closure)
-						);
-						continue;
-					}
-					$variableTypes[$use->var->name] = VariableTypeHolder::createYes(new NullType());
-				}
+			if ($use->byRef) {
 				continue;
 			}
-			$variableTypes[$use->var->name] = VariableTypeHolder::createYes($this->getVariableType($use->var->name));
+			if ($this->hasVariableType($use->var->name)->no()) {
+				$variableType = new MixedType();
+			} else {
+				$variableType = $this->getVariableType($use->var->name);
+			}
+			$variableTypes[$use->var->name] = VariableTypeHolder::createYes($variableType);
 		}
 
 		if ($this->hasVariableType('this')->yes()) {
@@ -2567,11 +2563,16 @@ class Scope implements ClassMemberAccessAnswerer
 	}
 
 	/**
-	 * @param self $intermediaryClosureScope
+	 * @param self $closureScope
+	 * @param self|null $prevScope
 	 * @param Expr\ClosureUse[] $byRefUses
 	 * @return self
 	 */
-	public function processIntermediaryClosureScope(self $intermediaryClosureScope, array $byRefUses): self
+	public function processClosureScope(
+		self $closureScope,
+		?self $prevScope,
+		array $byRefUses
+	): self
 	{
 		$variableTypes = $this->variableTypes;
 		foreach ($byRefUses as $use) {
@@ -2581,11 +2582,22 @@ class Scope implements ClassMemberAccessAnswerer
 
 			$variableName = $use->var->name;
 
-			if (!$intermediaryClosureScope->hasVariableType($variableName)->yes()) {
+			if (!$closureScope->hasVariableType($variableName)->yes()) {
+				$variableTypes[$variableName] = VariableTypeHolder::createYes(new NullType());
 				continue;
 			}
 
-			$variableTypes[$variableName] = VariableTypeHolder::createYes($intermediaryClosureScope->getVariableType($variableName));
+			$variableType = $closureScope->getVariableType($variableName);
+
+			if ($prevScope !== null) {
+				$prevVariableType = $prevScope->getVariableType($variableName);
+				if (!$variableType->equals($prevVariableType)) {
+					$variableType = TypeCombinator::union($variableType, $prevVariableType);
+					$variableType = self::generalizeType($variableType, $prevVariableType);
+				}
+			}
+
+			$variableTypes[$variableName] = VariableTypeHolder::createYes($variableType);
 		}
 
 		return $this->scopeFactory->create(
@@ -2645,22 +2657,28 @@ class Scope implements ClassMemberAccessAnswerer
 				continue;
 			}
 
-			$constantTypes = TypeUtils::getAnyConstantTypes($variableTypeHolder->getType());
-			$theirConstantTypes = TypeUtils::getAnyConstantTypes($otherVariableTypeHolders[$name]->getType());
-
-			if (
-				count($constantTypes) > 0
-				&& count($theirConstantTypes) > 0
-				&& !$variableTypeHolder->getType()->equals($otherVariableTypeHolders[$name]->getType())
-			) {
-				$variableTypeHolders[$name] = new VariableTypeHolder(
-					TypeUtils::generalizeType($variableTypeHolder->getType()),
-					$variableTypeHolder->getCertainty()
-				);
-			}
+			$variableTypeHolders[$name] = new VariableTypeHolder(
+				self::generalizeType($variableTypeHolder->getType(), $otherVariableTypeHolders[$name]->getType()),
+				$variableTypeHolder->getCertainty()
+			);
 		}
 
 		return $variableTypeHolders;
+	}
+
+	private function generalizeType(Type $a, Type $b): Type
+	{
+		if ($a->equals($b)) {
+			return $a;
+		}
+		$constantTypes = TypeUtils::getAnyConstantTypes($a);
+		$theirConstantTypes = TypeUtils::getAnyConstantTypes($b);
+
+		if (count($constantTypes) > 0 && count($theirConstantTypes) > 0) {
+			return TypeUtils::generalizeType($a);
+		}
+
+		return $a;
 	}
 
 	public function equals(self $otherScope): bool

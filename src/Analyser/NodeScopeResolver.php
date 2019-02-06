@@ -534,6 +534,8 @@ class NodeScopeResolver
 				$finalScope = $finalScope->mergeWith($condScope);
 			}
 
+			// todo u všech cyklů - podmínka nemusí být false, pokud cyklus opustíme skrze break
+
 			$finalScope = $finalScope->filterByFalseyValue($stmt->cond);
 
 			return new StatementResult($finalScope, $alwaysTerminatingStatements, []);
@@ -674,11 +676,10 @@ class NodeScopeResolver
 				} else {
 					$hasDefaultCase = true;
 					$branchScope = $scope;
-					for ($j = $i + 1; $j < count($stmt->cases); $j++) {
+					for ($j = 0; $j < $i; $j++) {
 						if ($stmt->cases[$j]->cond === null) {
 							continue;
 						}
-						// todo jak se to chova k tem predtim a potom?
 						$branchScope = $branchScope->filterByFalseyValue(new BinaryOp\Equal($stmt->cond, $stmt->cases[$j]->cond));
 					}
 				}
@@ -688,18 +689,18 @@ class NodeScopeResolver
 				$branchScope = $branchScopeResult->getScope();
 				$prevScope = $branchScopeResult->isAlwaysTerminating() ? null : $branchScope;
 				$isLastCase = ($i === count($stmt->cases) - 1);
-				$branchScopeForFinalScope = $branchScopeResult->filterOutLoopTerminationStatements();
-				if (!$branchScopeForFinalScope->isAlwaysTerminating()) {
+				if (
+					!$branchScopeResult->filterOutLoopTerminationStatements()->isAlwaysTerminating()
+					&& ($prevScope !== null || $isLastCase)
+				) {
 					$finalScope = $branchScope->mergeWith($finalScope);
-					foreach ($branchScopeForFinalScope->getExitPointsByType(Break_::class) as $breakExitPoint) {
+					foreach ($branchScopeResult->getExitPointsByType(Break_::class) as $breakExitPoint) {
 						$finalScope = $finalScope->mergeWith($breakExitPoint->getScope());
 					}
-					foreach ($branchScopeForFinalScope->getExitPointsByType(Continue_::class) as $continueExitPoint) {
+					foreach ($branchScopeResult->getExitPointsByType(Continue_::class) as $continueExitPoint) {
 						$finalScope = $finalScope->mergeWith($continueExitPoint->getScope());
 					}
 				}
-
-				// todo merge with break and continue
 			}
 
 			if (!$hasDefaultCase || $finalScope === null) {
@@ -771,10 +772,9 @@ class NodeScopeResolver
 			return new StatementResult($finalScope, $alwaysTerminatingStatements, $exitPoints);
 		} elseif ($stmt instanceof Unset_) {
 			foreach ($stmt->vars as $var) {
-				// todo enterExpressionAssign nahradit za lookForEnterVariableAssign
-				$scope = $scope->enterExpressionAssign($var);
+				$scope = $this->lookForEnterVariableAssign($scope, $var);
 				$scope = $this->processExprNode($var, $scope, $nodeCallback, 1);
-				$scope = $scope->exitExpressionAssign($var);
+				$scope = $this->lookForExitVariableAssign($scope, $var);
 				$scope = $scope->unsetExpression($var);
 			}
 		} elseif ($stmt instanceof Node\Stmt\Use_) {
@@ -789,9 +789,9 @@ class NodeScopeResolver
 				if (!is_string($var->name)) {
 					throw new ShouldNotHappenException();
 				}
-				$scope = $scope->enterExpressionAssign($var);
+				$scope = $this->lookForEnterVariableAssign($scope, $var);
 				$this->processExprNode($var, $scope, $nodeCallback, 1);
-				$scope = $scope->exitExpressionAssign($var);
+				$scope = $this->lookForExitVariableAssign($scope, $var);
 				$scope = $scope->assignVariable($var->name, new MixedType());
 			}
 		} elseif ($stmt instanceof Static_) {
@@ -817,6 +817,54 @@ class NodeScopeResolver
 		}
 
 		return new StatementResult($scope, [], []);
+	}
+
+	private function lookForEnterVariableAssign(Scope $scope, Expr $expr): Scope
+	{
+		return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
+			return $scope->enterExpressionAssign($expr);
+		});
+	}
+
+	private function lookForExitVariableAssign(Scope $scope, Expr $expr): Scope
+	{
+		return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
+			return $scope->exitExpressionAssign($expr);
+		});
+	}
+
+	/**
+	 * @param Scope $scope
+	 * @param Expr $expr
+	 * @param \Closure(Scope $scope, Expr $expr): Scope $callback
+	 * @return Scope
+	 */
+	private function lookForVariableAssignCallback(Scope $scope, Expr $expr, \Closure $callback): Scope
+	{
+		// todo tohle hodně zpomaluje analýzu
+		// možná by to šlo vyřešit přes shromáždění všech expr a ty pak do scopu dát naráz?
+		if ($expr instanceof Variable) {
+			$scope = $callback($scope, $expr);
+		} elseif ($expr instanceof ArrayDimFetch) {
+			while ($expr instanceof ArrayDimFetch) {
+				$scope = $callback($scope, $expr);
+				$expr = $expr->var;
+			}
+
+			$scope = $this->lookForVariableAssignCallback($scope, $expr, $callback);
+		} elseif ($expr instanceof PropertyFetch) {
+			$scope = $callback($scope, $expr);
+			$scope = $this->lookForVariableAssignCallback($scope, $expr->var, $callback);
+		} elseif ($expr instanceof StaticPropertyFetch) {
+			$scope = $callback($scope, $expr);
+			if ($expr->class instanceof Expr) {
+				$scope = $this->lookForVariableAssignCallback($scope, $expr->class, $callback);
+			}
+		} else {
+			$scope = $callback($scope, $expr);
+		}
+
+		return $scope;
 	}
 
 	private function findEarlyTerminatingExpr(Expr $expr, Scope $scope): ?Expr
@@ -1010,26 +1058,32 @@ class NodeScopeResolver
 			}
 
 			$closureScope = $scope->enterAnonymousFunction($expr);
+			$closureScope = $closureScope->processClosureScope($scope, null, $byRefUses);
 			if (count($byRefUses) === 0) {
 				$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
 			} else {
-				$prevScope = $closureScope;
-				$closureScope = $closureScope->enterAnonymousFunction($expr);
-				$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, function (): void {
+				$count = 0;
+				do {
+					$prevScope = $closureScope;
 
-				});
-				$intermediaryClosureScope = $intermediaryClosureScopeResult->getScope();
-				foreach ($intermediaryClosureScopeResult->getExitPoints() as $exitPoint) {
-					$intermediaryClosureScope = $intermediaryClosureScope->mergeWith($exitPoint->getScope());
-				}
-				$closureScope = $closureScope->processIntermediaryClosureScope($intermediaryClosureScope, $byRefUses);
-				if (!$closureScope->equals($prevScope)) {
-					$closureScope = $closureScope->generalizeWith($prevScope);
-				}
+					$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, function (): void {
+
+					});
+					$intermediaryClosureScope = $intermediaryClosureScopeResult->getScope();
+					foreach ($intermediaryClosureScopeResult->getExitPoints() as $exitPoint) {
+						$intermediaryClosureScope = $intermediaryClosureScope->mergeWith($exitPoint->getScope());
+					}
+					$closureScope = $scope->enterAnonymousFunction($expr);
+					$closureScope = $closureScope->processClosureScope($intermediaryClosureScope, $prevScope, $byRefUses);
+					if ($closureScope->equals($prevScope)) {
+						break;
+					}
+					$count++;
+				} while ($count < self::LOOP_SCOPE_ITERATIONS);
 
 				$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
 
-				$scope = $scope->processIntermediaryClosureScope($closureScope, $byRefUses);
+				$scope = $scope->processClosureScope($closureScope, null, $byRefUses);
 			}
 		} elseif ($expr instanceof Expr\ClosureUse) {
 			$this->processExprNode($expr->var, $scope, $nodeCallback, $depth);
@@ -1071,17 +1125,15 @@ class NodeScopeResolver
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always true
 		} elseif ($expr instanceof Coalesce) {
-			// todo enterExpressionAssign nahradit za lookForEnterVariableAssign
-			$scope = $scope->enterExpressionAssign($expr->left);
+			$scope = $this->lookForEnterVariableAssign($scope, $expr->left);
 			$scope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
-			$scope = $scope->exitExpressionAssign($expr->left);
+			$scope = $this->lookForExitVariableAssign($scope, $expr->left);
 			$scope = $this->processExprNode($expr->right, $scope, $nodeCallback, $depth + 1);
 		} elseif ($expr instanceof BinaryOp) {
 			$scope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
 			$scope = $this->processExprNode($expr->right, $scope, $nodeCallback, $depth + 1);
 		} elseif (
 			$expr instanceof Expr\BitwiseNot
-			|| $expr instanceof BooleanNot
 			|| $expr instanceof Cast
 			|| $expr instanceof Expr\Clone_
 			|| $expr instanceof Expr\Eval_
@@ -1092,21 +1144,23 @@ class NodeScopeResolver
 			|| $expr instanceof Expr\YieldFrom
 		) {
 			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
+		} elseif ($expr instanceof BooleanNot) {
+			$scope = $scope->enterNegation();
+			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
+			$scope = $scope->enterNegation();
 		} elseif ($expr instanceof Expr\ClassConstFetch) {
 			if ($expr->class instanceof Expr) {
 				$scope = $this->processExprNode($expr->class, $scope, $nodeCallback, $depth + 1);
 			}
 		} elseif ($expr instanceof Expr\Empty_) {
-			// todo enterExpressionAssign nahradit za lookForEnterVariableAssign
-			$scope = $scope->enterExpressionAssign($expr->expr);
+			$scope = $this->lookForEnterVariableAssign($scope, $expr->expr);
 			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
-			$scope = $scope->exitExpressionAssign($expr->expr);
+			$scope = $this->lookForExitVariableAssign($scope, $expr->expr);
 		} elseif ($expr instanceof Expr\Isset_) {
 			foreach ($expr->vars as $var) {
-				// todo enterExpressionAssign nahradit za lookForEnterVariableAssign
-				$scope = $scope->enterExpressionAssign($var);
+				$scope = $this->lookForEnterVariableAssign($scope, $var);
 				$scope = $this->processExprNode($var, $scope, $nodeCallback, $depth + 1);
-				$scope = $scope->exitExpressionAssign($var);
+				$scope = $this->lookForExitVariableAssign($scope, $var);
 			}
 		} elseif ($expr instanceof Instanceof_) {
 			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);

@@ -7450,7 +7450,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				"'beforeCallback'",
 			],
 			[
-				'1|bool',
+				'bool|int', // could be 1|bool
 				'$progressStarted',
 				"'inCallbackBeforeAssign'",
 			],
@@ -7465,7 +7465,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				"'inCallbackBeforeAssign'",
 			],
 			[
-				'1|true',
+				'int|true', // could be 1|true
 				'$progressStarted',
 				"'inCallbackAfterAssign'",
 			],
@@ -7475,7 +7475,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				"'inCallbackAfterAssign'",
 			],
 			[
-				'1|bool',
+				'bool|int', // could be 1|bool
 				'$progressStarted',
 				"'afterCallback'",
 			],
@@ -7509,6 +7509,26 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				'$incrementedInside',
 				"'afterCallback'",
 			],
+			[
+				'null',
+				'$fooOrNull',
+				"'beforeCallback'",
+			],
+			[
+				'ClosurePassedByReference\Foo|null',
+				'$fooOrNull',
+				"'inCallbackBeforeAssign'",
+			],
+			[
+				'ClosurePassedByReference\Foo',
+				'$fooOrNull',
+				"'inCallbackAfterAssign'",
+			],
+			[
+				'ClosurePassedByReference\Foo|null',
+				'$fooOrNull',
+				"'afterCallback'",
+			],
 		];
 	}
 
@@ -7526,6 +7546,56 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 	{
 		$this->assertTypes(
 			__DIR__ . '/data/closure-passed-by-reference.php',
+			$description,
+			$expression,
+			[],
+			[],
+			[],
+			[],
+			$evaluatedPointExpression
+		);
+	}
+
+	public function dataClosureWithUsePassedByReferenceReturn(): array
+	{
+		return [
+			[
+				'null',
+				'$fooOrNull',
+				"'beforeCallback'",
+			],
+			[
+				'ClosurePassedByReference\Foo|null',
+				'$fooOrNull',
+				"'inCallbackBeforeAssign'",
+			],
+			[
+				'ClosurePassedByReference\Foo',
+				'$fooOrNull',
+				"'inCallbackAfterAssign'",
+			],
+			[
+				'ClosurePassedByReference\Foo|null',
+				'$fooOrNull',
+				"'afterCallback'",
+			],
+		];
+	}
+
+	/**
+	 * @dataProvider dataClosureWithUsePassedByReferenceReturn
+	 * @param string $description
+	 * @param string $expression
+	 * @param string $evaluatedPointExpression
+	 */
+	public function testClosureWithUsePassedByReferenceReturn(
+		string $description,
+		string $expression,
+		string $evaluatedPointExpression
+	): void
+	{
+		$this->assertTypes(
+			__DIR__ . '/data/closure-passed-by-reference-return.php',
 			$description,
 			$expression,
 			[],

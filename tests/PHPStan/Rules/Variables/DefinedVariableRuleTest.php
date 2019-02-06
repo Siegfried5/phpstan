@@ -113,7 +113,7 @@ class DefinedVariableRuleTest extends \PHPStan\Testing\RuleTestCase
 				156,
 			],
 			[
-				'Undefined variable: $variableInIsset',
+				'Variable $variableInIsset might not be defined.',
 				161,
 			],
 			[

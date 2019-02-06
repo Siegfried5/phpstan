@@ -2,6 +2,7 @@
 
 namespace PHPStan\Analyser;
 
+use PhpParser\Node\Stmt;
 use PHPStan\Parser\Parser;
 
 class StatementResultTest extends \PHPStan\Testing\TestCase
@@ -109,6 +110,8 @@ class StatementResultTest extends \PHPStan\Testing\TestCase
 	{
 		/** @var Parser $parser */
 		$parser = self::getContainer()->getByType(Parser::class);
+
+		/** @var Stmt[] $stmts */
 		$stmts = $parser->parseString(sprintf('<?php %s', $code));
 
 		/** @var NodeScopeResolver $nodeScopeResolver */
