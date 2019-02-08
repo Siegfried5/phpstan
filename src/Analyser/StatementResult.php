@@ -45,6 +45,26 @@ class StatementResult
 		return $this->alwaysTerminatingStatements;
 	}
 
+	public function areAllAlwaysTerminatingStatementsLoopTerminationStatements(): bool
+	{
+		if (count($this->alwaysTerminatingStatements) === 0) {
+			return false;
+		}
+
+		foreach ($this->alwaysTerminatingStatements as $statement) {
+			if ($statement instanceof Stmt\Break_) {
+				continue;
+			}
+			if ($statement instanceof Stmt\Continue_) {
+				continue;
+			}
+
+			return false;
+		}
+
+		return true;
+	}
+
 	public function isAlwaysTerminating(): bool
 	{
 		return count($this->alwaysTerminatingStatements) > 0;

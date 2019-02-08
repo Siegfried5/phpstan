@@ -173,6 +173,10 @@ class DefinedVariableRuleTest extends \PHPStan\Testing\RuleTestCase
 				290,
 			],
 			[
+				'Variable $variableInSecondCase might not be defined.',
+				293,
+			],
+			[
 				'Undefined variable: $variableAssignedInSecondCase',
 				300,
 			],
