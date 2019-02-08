@@ -2556,6 +2556,11 @@ class Scope implements ClassMemberAccessAnswerer
 				&& !$originalVariableTypeHolders[$name]->getType()->equals($variableTypeHolder->getType())
 			) {
 				$ourVariableTypeHolders[$name] = $variableTypeHolder;
+				continue;
+			}
+
+			if (!isset($originalVariableTypeHolders[$name])) {
+				$ourVariableTypeHolders[$name] = $variableTypeHolder;
 			}
 		}
 

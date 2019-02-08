@@ -676,7 +676,6 @@ class NodeScopeResolver
 			$hasDefaultCase = false;
 			$alwaysTerminating = true;
 			$alwaysTerminatingStatements = [];
-			$defaultIsAlwaysTerminating = false;
 			foreach ($stmt->cases as $i => $caseNode) {
 				if ($caseNode->cond !== null) {
 					$condExpr = new BinaryOp\Equal($stmt->cond, $caseNode->cond);
@@ -697,9 +696,6 @@ class NodeScopeResolver
 				$branchScope = $branchScopeResult->getScope();
 				$branchFinalScopeResult = $branchScopeResult->filterOutLoopTerminationStatements();
 				$alwaysTerminating = $alwaysTerminating && $branchFinalScopeResult->isAlwaysTerminating();
-				if ($caseNode->cond === null) {
-					$defaultIsAlwaysTerminating = $branchFinalScopeResult->isAlwaysTerminating();
-				}
 				if ($branchFinalScopeResult->isAlwaysTerminating()) {
 					$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchFinalScopeResult->getAlwaysTerminatingStatements());
 				}
@@ -727,10 +723,7 @@ class NodeScopeResolver
 				$alwaysTerminating = false;
 			}
 
-			if ((
-				!$hasDefaultCase
-				|| !$defaultIsAlwaysTerminating
-			) || $finalScope === null) {
+			if (!$hasDefaultCase || $finalScope === null) {
 				$finalScope = $scope->mergeWith($finalScope);
 			}
 
