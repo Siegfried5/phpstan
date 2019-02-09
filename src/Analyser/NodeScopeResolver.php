@@ -958,16 +958,26 @@ class NodeScopeResolver
 			if ($expr instanceof AssignRef) {
 				$scope = $scope->enterExpressionAssign($expr->expr);
 			}
-			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
-			if ($expr instanceof AssignRef) {
-				$scope = $scope->exitExpressionAssign($expr->expr);
-			}
 
 			if ($expr instanceof Assign) {
 				$assignedType = $scope->getType($expr->expr);
 			} else {
 				$assignedType = $scope->getType($expr);
 			}
+
+			if ($expr->expr instanceof Expr\Closure) {
+				$assignedVariable = null;
+				if ($expr->var instanceof Variable && is_string($expr->var->name)) {
+						$assignedVariable = $expr->var->name;
+				}
+				$scope = $this->processClosureNode($expr->expr, $scope, $nodeCallback, $depth + 1, $assignedVariable);
+			} else {
+				$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
+			}
+			if ($expr instanceof AssignRef) {
+				$scope = $scope->exitExpressionAssign($expr->expr);
+			}
+
 			if (!$expr->var instanceof Array_ && !$expr->var instanceof List_) {
 				$this->processExprNode($expr->var, $scope->enterExpressionAssign($expr->var), $nodeCallback, 1);
 				$scope = $this->processAssignVar(
@@ -1000,13 +1010,102 @@ class NodeScopeResolver
 			if ($expr->name instanceof Expr) {
 				$scope = $this->processExprNode($expr->name, $scope, $nodeCallback, $depth + 1);
 			} elseif ($this->broker->hasFunction($expr->name, $scope)) {
+				$function = $this->broker->getFunction($expr->name, $scope);
 				$parametersAcceptor = ParametersAcceptorSelector::selectFromArgs(
 					$scope,
 					$expr->args,
-					$this->broker->getFunction($expr->name, $scope)->getVariants()
+					$function->getVariants()
 				);
 			}
 			$scope = $this->processArgs($parametersAcceptor, $expr->args, $scope, $nodeCallback, $depth);
+			if (
+				isset($function)
+				&& in_array($function->getName(), ['array_pop', 'array_shift'], true)
+				&& count($expr->args) >= 1
+			) {
+				$arrayArg = $expr->args[0]->value;
+				$constantArrays = TypeUtils::getConstantArrays($scope->getType($arrayArg));
+				if (count($constantArrays) > 0) {
+					$resultArrayTypes = [];
+
+					foreach ($constantArrays as $constantArray) {
+						if ($function->getName() === 'array_pop') {
+							$resultArrayTypes[] = $constantArray->removeLast();
+						} else {
+							$resultArrayTypes[] = $constantArray->removeFirst();
+						}
+					}
+
+					$scope = $scope->specifyExpressionType(
+						$arrayArg,
+						TypeCombinator::union(...$resultArrayTypes)
+					);
+				}
+			}
+
+			if (
+				isset($function)
+				&& in_array($function->getName(), ['array_push', 'array_unshift'], true)
+				&& count($expr->args) >= 2
+			) {
+				$argumentTypes = [];
+				foreach (array_slice($expr->args, 1) as $callArg) {
+					$callArgType = $scope->getType($callArg->value);
+					if ($callArg->unpack) {
+						$iterableValueType = $callArgType->getIterableValueType();
+						if ($iterableValueType instanceof UnionType) {
+							foreach ($iterableValueType->getTypes() as $innerType) {
+								$argumentTypes[] = $innerType;
+							}
+						} else {
+							$argumentTypes[] = $iterableValueType;
+						}
+						continue;
+					}
+
+					$argumentTypes[] = $callArgType;
+				}
+
+				$arrayArg = $expr->args[0]->value;
+				$originalArrayType = $scope->getType($arrayArg);
+				$constantArrays = TypeUtils::getConstantArrays($originalArrayType);
+				if (
+					$function->getName() === 'array_push'
+					|| ($originalArrayType instanceof ArrayType && count($constantArrays) === 0)
+				) {
+					$arrayType = $originalArrayType;
+					foreach ($argumentTypes as $argType) {
+						$arrayType = $arrayType->setOffsetValueType(null, $argType);
+					}
+
+					$scope = $scope->specifyExpressionType($arrayArg, $arrayType);
+				} elseif (count($constantArrays) > 0) {
+					$defaultArrayBuilder = ConstantArrayTypeBuilder::createEmpty();
+					foreach ($argumentTypes as $argType) {
+						$defaultArrayBuilder->setOffsetValueType(null, $argType);
+					}
+
+					$defaultArrayType = $defaultArrayBuilder->getArray();
+
+					$arrayTypes = [];
+					foreach ($constantArrays as $constantArray) {
+						$arrayType = $defaultArrayType;
+						foreach ($constantArray->getKeyTypes() as $i => $keyType) {
+							$valueType = $constantArray->getValueTypes()[$i];
+							if ($keyType instanceof ConstantIntegerType) {
+								$keyType = null;
+							}
+							$arrayType = $arrayType->setOffsetValueType($keyType, $valueType);
+						}
+						$arrayTypes[] = $arrayType;
+					}
+
+					$scope = $scope->specifyExpressionType(
+						$arrayArg,
+						TypeCombinator::union(...$arrayTypes)
+					);
+				}
+			}
 		} elseif ($expr instanceof MethodCall) {
 			$scope = $this->processExprNode($expr->var, $scope, $nodeCallback, $depth + 1);
 			$parametersAcceptor = null;
@@ -1059,54 +1158,7 @@ class NodeScopeResolver
 				$scope = $this->processExprNode($expr->name, $scope, $nodeCallback, $depth + 1);
 			}
 		} elseif ($expr instanceof Expr\Closure) {
-			foreach ($expr->params as $param) {
-				$this->processParamNode($param, $scope, $nodeCallback);
-			}
-
-			$byRefUses = [];
-			foreach ($expr->uses as $use) {
-				if ($use->byRef) {
-					$byRefUses[] = $use;
-					$scope = $scope->enterExpressionAssign($use->var);
-				}
-				$this->processExprNode($use, $scope, $nodeCallback, $depth);
-				if ($use->byRef) {
-					$scope = $scope->exitExpressionAssign($use->var);
-				}
-			}
-
-			if ($expr->returnType !== null) {
-				$nodeCallback($expr->returnType, $scope);
-			}
-
-			$closureScope = $scope->enterAnonymousFunction($expr);
-			$closureScope = $closureScope->processClosureScope($scope, null, $byRefUses);
-			if (count($byRefUses) === 0) {
-				$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
-			} else {
-				$count = 0;
-				do {
-					$prevScope = $closureScope;
-
-					$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, function (): void {
-
-					});
-					$intermediaryClosureScope = $intermediaryClosureScopeResult->getScope();
-					foreach ($intermediaryClosureScopeResult->getExitPoints() as $exitPoint) {
-						$intermediaryClosureScope = $intermediaryClosureScope->mergeWith($exitPoint->getScope());
-					}
-					$closureScope = $scope->enterAnonymousFunction($expr);
-					$closureScope = $closureScope->processClosureScope($intermediaryClosureScope, $prevScope, $byRefUses);
-					if ($closureScope->equals($prevScope)) {
-						break;
-					}
-					$count++;
-				} while ($count < self::LOOP_SCOPE_ITERATIONS);
-
-				$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
-
-				$scope = $scope->processClosureScope($closureScope, null, $byRefUses);
-			}
+			$scope = $this->processClosureNode($expr, $scope, $nodeCallback, $depth, null);
 		} elseif ($expr instanceof Expr\ClosureUse) {
 			$this->processExprNode($expr->var, $scope, $nodeCallback, $depth);
 		} elseif ($expr instanceof ErrorSuppress) {
@@ -1268,6 +1320,80 @@ class NodeScopeResolver
 		}
 
 		return $scope;
+	}
+
+	/**
+	 * @param \PhpParser\Node\Expr\Closure $expr
+	 * @param \PHPStan\Analyser\Scope $scope
+	 * @param \Closure(\PhpParser\Node $node, Scope $scope): void $nodeCallback
+	 * @param int $depth
+	 * @param string $assignedVariable
+	 * @return \PHPStan\Analyser\Scope $scope
+	 */
+	private function processClosureNode(
+		Expr\Closure $expr,
+		Scope $scope,
+		\Closure $nodeCallback,
+		int $depth,
+		?string $assignedVariable
+	): Scope
+	{
+		foreach ($expr->params as $param) {
+			$this->processParamNode($param, $scope, $nodeCallback);
+		}
+
+		$byRefUses = [];
+		$assignSelf = false;
+		foreach ($expr->uses as $use) {
+			if ($use->byRef) {
+				$byRefUses[] = $use;
+				$scope = $scope->enterExpressionAssign($use->var);
+			}
+			$this->processExprNode($use, $scope, $nodeCallback, $depth);
+			if ($use->byRef) {
+				$scope = $scope->exitExpressionAssign($use->var);
+				if ($assignedVariable === $use->var->name) {
+					$assignSelf = true;
+				}
+			}
+		}
+
+		if ($expr->returnType !== null) {
+			$nodeCallback($expr->returnType, $scope);
+		}
+
+		if ($assignedVariable !== null && $assignSelf) {
+			$scope = $scope->assignVariable($assignedVariable, $scope->getType($expr));
+		}
+		$closureScope = $scope->enterAnonymousFunction($expr);
+		$closureScope = $closureScope->processClosureScope($scope, null, $byRefUses);
+		if (count($byRefUses) === 0) {
+			$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
+			return $scope;
+		}
+
+		$count = 0;
+		do {
+			$prevScope = $closureScope;
+
+			$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, function (): void {
+
+			});
+			$intermediaryClosureScope = $intermediaryClosureScopeResult->getScope();
+			foreach ($intermediaryClosureScopeResult->getExitPoints() as $exitPoint) {
+				$intermediaryClosureScope = $intermediaryClosureScope->mergeWith($exitPoint->getScope());
+			}
+			$closureScope = $scope->enterAnonymousFunction($expr);
+			$closureScope = $closureScope->processClosureScope($intermediaryClosureScope, $prevScope, $byRefUses);
+			if ($closureScope->equals($prevScope)) {
+				break;
+			}
+			$count++;
+		} while ($count < self::LOOP_SCOPE_ITERATIONS);
+
+		$this->processStmtNodes($expr->stmts, $closureScope, $nodeCallback);
+
+		return $scope->processClosureScope($closureScope, null, $byRefUses);
 	}
 
 	private function lookForArrayDestructuringArray(Scope $scope, Expr $expr, Type $valueType): Scope
