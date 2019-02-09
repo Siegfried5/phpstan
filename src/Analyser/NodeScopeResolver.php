@@ -454,7 +454,6 @@ class NodeScopeResolver
 
 				})->filterOutLoopTerminationStatements();
 				$alwaysTerminating = $bodyScopeResult->isAlwaysTerminating();
-				$alwaysTerminatingStatements = $bodyScopeResult->getAlwaysTerminatingStatements();
 				$bodyScope = $bodyScopeResult->getScope();
 				foreach ($bodyScopeResult->getExitPointsByType(Continue_::class) as $continueExitPoint) {
 					$bodyScope = $bodyScope->mergeWith($continueExitPoint->getScope());
@@ -469,7 +468,8 @@ class NodeScopeResolver
 
 			$bodyScope = $bodyScope->mergeWith($scope);
 			$bodyScope = $this->enterForeach($bodyScope, $stmt);
-			$finalScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, $nodeCallback);
+			$finalScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, $nodeCallback)->filterOutLoopTerminationStatements();
+			$alwaysTerminatingStatements = $finalScopeResult->getAlwaysTerminatingStatements();
 			$finalScope = $finalScopeResult->getScope();
 			foreach ($finalScopeResult->getExitPointsByType(Continue_::class) as $continueExitPoint) {
 				$finalScope = $continueExitPoint->getScope()->mergeWith($finalScope);
@@ -479,16 +479,16 @@ class NodeScopeResolver
 			}
 
 			$isIterableAtLeastOnce = $scope->getType($stmt->expr)->isIterableAtLeastOnce();
-			if (!$isIterableAtLeastOnce->no()) { // todo always terminating?
-				if (!$isIterableAtLeastOnce->yes() || !$this->polluteScopeWithAlwaysIterableForeach) {
-					// todo přepisovat existující proměnné, ale nepřidávat nové v případě !$this->polluteScopeWithAlwaysIterableForeach
-					$finalScope = $finalScope->mergeWith($scope);
-				}
-			} else {
+			if ($isIterableAtLeastOnce->no() || $finalScopeResult->isAlwaysTerminating()) {
 				$finalScope = $scope;
+			} elseif ($isIterableAtLeastOnce->maybe()) {
+				$finalScope = $finalScope->mergeWith($scope);
+			} elseif (!$this->polluteScopeWithAlwaysIterableForeach) {
+				$finalScope = $scope->processAlwaysIterableForeachScopeWithoutPollute($finalScope);
+				// get types from finalScope, but don't create new variables
 			}
 
-			return new StatementResult($finalScope, $alwaysTerminatingStatements, []);
+			return new StatementResult($finalScope, $alwaysTerminating ? $alwaysTerminatingStatements : [], []);
 		} elseif ($stmt instanceof While_) {
 			$condScope = $this->processExprNode($stmt->cond, $scope, function (): void {
 
@@ -971,6 +971,7 @@ class NodeScopeResolver
 				if ($expr->var instanceof Variable && is_string($expr->var->name)) {
 						$assignedVariable = $expr->var->name;
 				}
+				$nodeCallback($expr->expr, $scope);
 				$scope = $this->processClosureNode($expr->expr, $scope, $nodeCallback, $depth + 1, $assignedVariable);
 			} else {
 				$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);

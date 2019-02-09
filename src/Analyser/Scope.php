@@ -2643,6 +2643,43 @@ class Scope implements ClassMemberAccessAnswerer
 		);
 	}
 
+	public function processAlwaysIterableForeachScopeWithoutPollute(self $finalScope): self
+	{
+		$variableTypeHolders = $this->variableTypes;
+		foreach ($finalScope->variableTypes as $name => $variableTypeHolder) {
+			if (!isset($variableTypeHolders[$name])) {
+				$variableTypeHolders[$name] = VariableTypeHolder::createMaybe($variableTypeHolder->getType());
+				continue;
+			}
+
+			$variableTypeHolders[$name] = $variableTypeHolder;
+		}
+
+		$moreSpecificTypes = $this->moreSpecificTypes;
+		foreach ($finalScope->moreSpecificTypes as $exprString => $variableTypeHolder) {
+			if (!isset($moreSpecificTypes[$exprString])) {
+				$moreSpecificTypes[$exprString] = VariableTypeHolder::createMaybe($variableTypeHolder->getType());
+				continue;
+			}
+
+			$moreSpecificTypes[$exprString] = $variableTypeHolder;
+		}
+
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$variableTypeHolders,
+			$moreSpecificTypes,
+			$this->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
+			$this->isNegated(),
+			$this->inFirstLevelStatement
+		);
+	}
+
 	public function generalizeWith(self $otherScope): self
 	{
 		$variableTypeHolders = $this->generalizeVariableTypeHolders(
