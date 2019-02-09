@@ -72,6 +72,7 @@ use PHPStan\Type\ErrorType;
 use PHPStan\Type\FileTypeMapper;
 use PHPStan\Type\IntegerType;
 use PHPStan\Type\MixedType;
+use PHPStan\Type\NullType;
 use PHPStan\Type\ObjectType;
 use PHPStan\Type\StringType;
 use PHPStan\Type\Type;
@@ -1107,7 +1108,20 @@ class NodeScopeResolver
 				}
 			}
 		} elseif ($expr instanceof MethodCall) {
-			$scope = $this->processExprNode($expr->var, $scope, $nodeCallback, $depth + 1);
+			$originalScope = $scope;
+			if (
+				$expr->var instanceof Expr\Closure
+				&& $expr->name instanceof Node\Identifier
+				&& strtolower($expr->name->name) === 'call'
+				&& isset($expr->args[0])
+			) {
+				$closureCallScope = $scope->enterClosureCall($scope->getType($expr->args[0]->value));
+			}
+
+			$scope = $this->processExprNode($expr->var, $closureCallScope ?? $scope, $nodeCallback, $depth + 1);
+			if (isset($closureCallScope)) {
+				$scope = $scope->restoreOriginalScopeAfterClosureBind($originalScope);
+			}
 			$parametersAcceptor = null;
 			if ($expr->name instanceof Expr) {
 				$scope = $this->processExprNode($expr->name, $scope, $nodeCallback, $depth + 1);
@@ -1127,6 +1141,7 @@ class NodeScopeResolver
 			if ($expr->class instanceof Expr) {
 				$scope = $this->processExprNode($expr->class, $scope, $nodeCallback, $depth + 1);
 			}
+			$originalScope = $scope;
 
 			$parametersAcceptor = null;
 			if ($expr->name instanceof Expr) {
@@ -1141,10 +1156,44 @@ class NodeScopeResolver
 							$expr->args,
 							$classReflection->getMethod($expr->name->name, $scope)->getVariants()
 						);
+						if (
+							$classReflection->getName() === 'Closure'
+							&& strtolower($expr->name->name) === 'bind'
+						) {
+							$thisType = null;
+							if (isset($expr->args[1])) {
+								$argType = $scope->getType($expr->args[1]->value);
+								if ($argType instanceof NullType) {
+									$thisType = null;
+								} else {
+									$thisType = $argType;
+								}
+							}
+							$scopeClass = 'static';
+							if (isset($expr->args[2])) {
+								$argValue = $expr->args[2]->value;
+								$argValueType = $scope->getType($argValue);
+
+								$directClassNames = TypeUtils::getDirectClassNames($argValueType);
+								if (count($directClassNames) === 1) {
+									$scopeClass = $directClassNames[0];
+								} elseif (
+									$argValue instanceof Expr\ClassConstFetch
+									&& $argValue->name instanceof Node\Identifier
+									&& strtolower($argValue->name->name) === 'class'
+									&& $argValue->class instanceof Name
+								) {
+									$scopeClass = $scope->resolveName($argValue->class);
+								} elseif ($argValueType instanceof ConstantStringType) {
+									$scopeClass = $argValueType->getValue();
+								}
+							}
+							$closureBindScope = $scope->enterClosureBind($thisType, $scopeClass);
+						}
 					}
 				}
 			}
-			$scope = $this->processArgs($parametersAcceptor, $expr->args, $scope, $nodeCallback, $depth);
+			$scope = $this->processArgs($parametersAcceptor, $expr->args, $scope, $nodeCallback, $depth, $closureBindScope ?? null);
 		} elseif ($expr instanceof PropertyFetch) {
 			$scope = $this->processExprNode($expr->var, $scope, $nodeCallback, $depth + 1);
 			if ($expr->name instanceof Expr) {
@@ -1466,6 +1515,7 @@ class NodeScopeResolver
 	 * @param \PHPStan\Analyser\Scope $scope
 	 * @param \Closure(\PhpParser\Node $node, Scope $scope): void $nodeCallback
 	 * @param int $depth
+	 * @param \PHPStan\Analyser\Scope|null $closureBindScope
 	 * @return \PHPStan\Analyser\Scope
 	 */
 	private function processArgs(
@@ -1473,7 +1523,8 @@ class NodeScopeResolver
 		array $args,
 		Scope $scope,
 		\Closure $nodeCallback,
-		int $depth
+		int $depth,
+		?Scope $closureBindScope = null
 	): Scope
 	{
 		// todo $scope = $scope->enterFunctionCall();
@@ -1499,7 +1550,16 @@ class NodeScopeResolver
 					}
 				}
 			}
-			$scope = $this->processExprNode($arg->value, $scope, $nodeCallback, $depth + 1);
+
+			$originalScope = $scope;
+			$scopeToPass = $scope;
+			if ($i === 0 && $closureBindScope !== null) {
+				$scopeToPass = $closureBindScope;
+			}
+			$scope = $this->processExprNode($arg->value, $scopeToPass, $nodeCallback, $depth + 1);
+			if ($i === 0 && $closureBindScope !== null) {
+				$scope = $scope->restoreOriginalScopeAfterClosureBind($originalScope);
+			}
 		}
 
 		// todo $scope = $scope->exitFunctionCall();

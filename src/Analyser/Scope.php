@@ -1909,6 +1909,29 @@ class Scope implements ClassMemberAccessAnswerer
 		);
 	}
 
+	public function restoreOriginalScopeAfterClosureBind(self $originalScope): self
+	{
+		$variableTypes = $this->getVariableTypes();
+		if (isset($originalScope->variableTypes['this'])) {
+			$variableTypes['this'] = $originalScope->variableTypes['this'];
+		} else {
+			unset($variableTypes['this']);
+		}
+
+		return $this->scopeFactory->create(
+			$this->context,
+			$this->isDeclareStrictTypes(),
+			$this->getFunction(),
+			$this->getNamespace(),
+			$variableTypes,
+			$this->moreSpecificTypes,
+			$originalScope->inClosureBindScopeClass,
+			$this->getAnonymousFunctionReturnType(),
+			$this->getInFunctionCall(),
+			$this->isNegated()
+		);
+	}
+
 	public function enterClosureCall(Type $thisType): self
 	{
 		$variableTypes = $this->getVariableTypes();
