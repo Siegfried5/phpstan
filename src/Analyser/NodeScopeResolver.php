@@ -888,6 +888,14 @@ class NodeScopeResolver
 			if ($expr->class instanceof Expr) {
 				$scope = $this->lookForVariableAssignCallback($scope, $expr->class, $callback);
 			}
+		} elseif ($expr instanceof Array_ || $expr instanceof List_) {
+			foreach ($expr->items as $item) {
+				if ($item === null) {
+					continue;
+				}
+
+				$scope = $this->lookForVariableAssignCallback($scope, $item->value, $callback);
+			}
 		}
 
 		return $scope;
@@ -1003,6 +1011,13 @@ class NodeScopeResolver
 					$assignedType
 				);
 			} else {
+				foreach ($expr->var->items as $arrayItem) {
+					if ($arrayItem === null) {
+						continue;
+					}
+
+					$this->processExprNode($arrayItem, $this->lookForEnterVariableAssign($scope, $arrayItem->value), $nodeCallback, 1);
+				}
 				$scope = $this->lookForArrayDestructuringArray($scope, $expr->var, $assignedType);
 			}
 
@@ -1248,7 +1263,6 @@ class NodeScopeResolver
 
 			$scope = $this->processExprNode($expr->var, $scope, $nodeCallback, $depth + 1);
 		} elseif ($expr instanceof Array_) {
-			// todo isInAssign - like list(), should be handled elsewhere
 			foreach ($expr->items as $arrayItem) {
 				$scope = $this->processExprNode($arrayItem, $scope, $nodeCallback, $depth + 1);
 			}
