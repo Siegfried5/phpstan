@@ -844,16 +844,26 @@ class NodeScopeResolver
 
 	private function lookForEnterVariableAssign(Scope $scope, Expr $expr): Scope
 	{
-		return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
-			return $scope->enterExpressionAssign($expr);
-		});
+		$scope = $scope->enterExpressionAssign($expr);
+		if (!$expr instanceof Variable) {
+			return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
+				return $scope->enterExpressionAssign($expr);
+			});
+		}
+
+		return $scope;
 	}
 
 	private function lookForExitVariableAssign(Scope $scope, Expr $expr): Scope
 	{
-		return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
-			return $scope->exitExpressionAssign($expr);
-		});
+		$scope = $scope->exitExpressionAssign($expr);
+		if (!$expr instanceof Variable) {
+			return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
+				return $scope->exitExpressionAssign($expr);
+			});
+		}
+
+		return $scope;
 	}
 
 	/**
@@ -864,27 +874,20 @@ class NodeScopeResolver
 	 */
 	private function lookForVariableAssignCallback(Scope $scope, Expr $expr, \Closure $callback): Scope
 	{
-		// todo tohle hodně zpomaluje analýzu
-		// možná by to šlo vyřešit přes shromáždění všech expr a ty pak do scopu dát naráz?
 		if ($expr instanceof Variable) {
 			$scope = $callback($scope, $expr);
 		} elseif ($expr instanceof ArrayDimFetch) {
 			while ($expr instanceof ArrayDimFetch) {
-				$scope = $callback($scope, $expr);
 				$expr = $expr->var;
 			}
 
 			$scope = $this->lookForVariableAssignCallback($scope, $expr, $callback);
 		} elseif ($expr instanceof PropertyFetch) {
-			$scope = $callback($scope, $expr);
 			$scope = $this->lookForVariableAssignCallback($scope, $expr->var, $callback);
 		} elseif ($expr instanceof StaticPropertyFetch) {
-			$scope = $callback($scope, $expr);
 			if ($expr->class instanceof Expr) {
 				$scope = $this->lookForVariableAssignCallback($scope, $expr->class, $callback);
 			}
-		} else {
-			$scope = $callback($scope, $expr);
 		}
 
 		return $scope;

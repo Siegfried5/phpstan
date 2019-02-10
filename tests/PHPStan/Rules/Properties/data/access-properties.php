@@ -355,3 +355,37 @@ class ClosureCallSupport
 	}
 
 }
+
+class AccessPropertyWithDimFetch
+{
+
+	public function doFoo()
+	{
+		$this->foo['foo'] = 'test';
+	}
+
+	public function doBar()
+	{
+		$this->foo = 'test'; // reported by a separate rule
+	}
+
+}
+
+class AccessInIsset
+{
+
+	public function doFoo()
+	{
+		if (isset($this->foo)) {
+
+		}
+	}
+
+	public function doBar()
+	{
+		if (isset($this->foo['foo'])) {
+
+		}
+	}
+
+}

@@ -150,6 +150,14 @@ class AccessPropertiesRuleTest extends \PHPStan\Testing\RuleTestCase
 					DIRECTORY_SEPARATOR === '/' ? 'Access to an undefined property class@anonymous/tests/PHPStan/Rules/Properties/data/access-properties.php:294::$barProperty.' : 'Access to an undefined property class@anonymous/tests\PHPStan\Rules\Properties\data\access-properties.php:294::$barProperty.',
 					299,
 				],
+				[
+					'Access to an undefined property TestAccessProperties\AccessPropertyWithDimFetch::$foo.',
+					364,
+				],
+				[
+					'Access to an undefined property TestAccessProperties\AccessInIsset::$foo.',
+					386,
+				],
 			]
 		);
 	}
@@ -269,6 +277,14 @@ class AccessPropertiesRuleTest extends \PHPStan\Testing\RuleTestCase
 					DIRECTORY_SEPARATOR === '/' ? 'Access to an undefined property class@anonymous/tests/PHPStan/Rules/Properties/data/access-properties.php:294::$barProperty.' : 'Access to an undefined property class@anonymous/tests\PHPStan\Rules\Properties\data\access-properties.php:294::$barProperty.',
 					299,
 				],
+				[
+					'Access to an undefined property TestAccessProperties\AccessPropertyWithDimFetch::$foo.',
+					364,
+				],
+				[
+					'Access to an undefined property TestAccessProperties\AccessInIsset::$foo.',
+					386,
+				],
 			]
 		);
 	}
@@ -287,6 +303,14 @@ class AccessPropertiesRuleTest extends \PHPStan\Testing\RuleTestCase
 				[
 					'Access to private property $foo of parent class TestAccessProperties\FooAccessProperties.',
 					24,
+				],
+				[
+					'Access to an undefined property TestAccessProperties\AccessPropertyWithDimFetch::$foo.',
+					364,
+				],
+				[
+					'Access to an undefined property TestAccessProperties\AccessInIsset::$foo.',
+					386,
 				],
 			]
 		);
