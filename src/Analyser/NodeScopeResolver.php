@@ -1108,6 +1108,13 @@ class NodeScopeResolver
 					);
 				}
 			}
+
+			if (
+				isset($function)
+				&& in_array($function->getName(), ['fopen', 'file_get_contents'], true)
+			) {
+				$scope = $scope->assignVariable('http_response_header', new ArrayType(new IntegerType(), new StringType()));
+			}
 		} elseif ($expr instanceof MethodCall) {
 			$originalScope = $scope;
 			if (
