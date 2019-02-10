@@ -985,7 +985,6 @@ class NodeScopeResolver
 				$scope = $this->processAssignVar(
 					$scope,
 					$expr->var,
-					$nodeCallback,
 					$assignedType
 				);
 			} else {
@@ -1004,7 +1003,6 @@ class NodeScopeResolver
 			$scope = $this->processAssignVar(
 				$scope,
 				$expr->var,
-				$nodeCallback,
 				$scope->getType($expr)
 			);
 		} elseif ($expr instanceof FuncCall) {
@@ -1344,9 +1342,6 @@ class NodeScopeResolver
 					$scope = $this->processAssignVar(
 						$scope,
 						$expr->var,
-						function (): void {
-
-						},
 						$newExpressionType
 					);
 				}
@@ -1578,14 +1573,12 @@ class NodeScopeResolver
 	/**
 	 * @param \PHPStan\Analyser\Scope $scope
 	 * @param \PhpParser\Node\Expr $var
-	 * @param \Closure(\PhpParser\Node $node, Scope $scope): void $nodeCallback
 	 * @param Type $subNodeType
 	 * @return Scope
 	 */
 	private function processAssignVar(
 		Scope $scope,
 		Expr $var,
-		\Closure $nodeCallback,
 		Type $subNodeType
 	): Scope
 	{
@@ -1599,7 +1592,9 @@ class NodeScopeResolver
 			}
 
 			// 1. eval root expr
-			$scope = $this->processExprNode($var, $scope, $nodeCallback, 1);
+			$scope = $this->processExprNode($var, $scope, function (): void {
+
+			}, 1);
 
 			// 2. eval dimensions
 			$offsetTypes = [];
@@ -1611,7 +1606,9 @@ class NodeScopeResolver
 					if ($dimExpr instanceof Expr\PreInc || $dimExpr instanceof Expr\PreDec) {
 						$dimExpr = $dimExpr->var;
 					}
-					$scope = $this->processExprNode($dimExpr, $scope, $nodeCallback, 1);
+					$scope = $this->processExprNode($dimExpr, $scope, function (): void {
+
+					}, 1);
 					$offsetTypes[] = $scope->getType($dimExpr);
 				}
 			}
