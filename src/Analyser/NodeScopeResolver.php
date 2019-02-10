@@ -981,7 +981,16 @@ class NodeScopeResolver
 			}
 
 			if (!$expr->var instanceof Array_ && !$expr->var instanceof List_) {
-				$this->processExprNode($expr->var, $scope->enterExpressionAssign($expr->var), $nodeCallback, 1);
+				$var = $expr->var;
+				$exprScope = $scope->enterExpressionAssign($var);
+				while ($var instanceof ArrayDimFetch) {
+					$var = $var->var;
+
+					if ($var instanceof ArrayDimFetch || $var instanceof Variable) {
+						$exprScope = $exprScope->enterExpressionAssign($var);
+					}
+				}
+				$this->processExprNode($expr->var, $exprScope, $nodeCallback, 1);
 				$scope = $this->processAssignVar(
 					$scope,
 					$expr->var,
