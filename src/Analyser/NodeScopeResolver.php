@@ -1283,6 +1283,8 @@ class NodeScopeResolver
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always true
 		} elseif ($expr instanceof Coalesce) {
+			// todo ensure non-nullability
+			// todo i pro isset a empty
 			$scope = $this->lookForEnterVariableAssign($scope, $expr->left);
 			$scope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
 			$scope = $this->lookForExitVariableAssign($scope, $expr->left);
