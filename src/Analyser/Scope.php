@@ -1720,7 +1720,8 @@ class Scope implements ClassMemberAccessAnswerer
 	{
 		$exprString = $this->printer->prettyPrintExpr($node);
 
-		return isset($this->moreSpecificTypes[$exprString]);
+		return isset($this->moreSpecificTypes[$exprString])
+			&& $this->moreSpecificTypes[$exprString]->getCertainty()->yes();
 	}
 
 	public function enterClass(ClassReflection $classReflection): self

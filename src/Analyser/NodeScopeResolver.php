@@ -982,11 +982,14 @@ class NodeScopeResolver
 
 			if (!$expr->var instanceof Array_ && !$expr->var instanceof List_) {
 				$var = $expr->var;
+
+				// todo až uvnitř processAssignVar
 				$exprScope = $scope->enterExpressionAssign($var);
 				while ($var instanceof ArrayDimFetch) {
 					$var = $var->var;
 
 					if ($var instanceof ArrayDimFetch || $var instanceof Variable) {
+						// todo až uvnitř processAssignVar
 						$exprScope = $exprScope->enterExpressionAssign($var);
 					}
 				}
