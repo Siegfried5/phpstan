@@ -404,3 +404,6 @@ switch ($definedInSwitchCond = true) {
 }
 
 echo $definedInSwitchCond;
+
+$someOtherArray = [];
+$someOtherArray[$undefinedArrayIndex][$anotherUndefinedArrayIndex] = 0;

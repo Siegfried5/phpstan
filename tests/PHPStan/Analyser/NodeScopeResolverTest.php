@@ -2728,6 +2728,14 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				'$preIncArray',
 			],
 			[
+				'array(0 => 1, 2 => 3)',
+				'$postIncArray',
+			],
+			[
+				'array(0 => array(1 => array(2 => 3)), 4 => array(5 => array(6 => 7)))',
+				'$anotherPostIncArray',
+			],
+			[
 				'3',
 				'count($array)',
 			],
