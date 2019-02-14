@@ -158,6 +158,10 @@ class AccessPropertiesRuleTest extends \PHPStan\Testing\RuleTestCase
 					'Access to an undefined property TestAccessProperties\AccessInIsset::$foo.',
 					386,
 				],
+				[
+					'Cannot access property $selfOrNull on TestAccessProperties\RevertNonNullabilityForIsset|null.',
+					402,
+				],
 			]
 		);
 	}

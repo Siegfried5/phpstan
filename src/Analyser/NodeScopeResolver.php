@@ -901,6 +901,59 @@ class NodeScopeResolver
 		return $scope;
 	}
 
+	private function ensureNonNullability(Scope $scope, Expr $expr, bool $findMethods): EnsuredNonNullabilityResult
+	{
+		$exprToSpecify = $expr;
+		$specifiedExpressions = [];
+		while (
+			$exprToSpecify instanceof PropertyFetch
+			|| $exprToSpecify instanceof StaticPropertyFetch
+			|| (
+				$findMethods && (
+					$exprToSpecify instanceof MethodCall
+					|| $exprToSpecify instanceof StaticCall
+				)
+			)
+		) {
+			if (
+				$exprToSpecify instanceof PropertyFetch
+				|| $exprToSpecify instanceof MethodCall
+			) {
+				$exprToSpecify = $exprToSpecify->var;
+			} elseif ($exprToSpecify->class instanceof Expr) {
+				$exprToSpecify = $exprToSpecify->class;
+			} else {
+				break;
+			}
+
+			$exprType = $scope->getType($exprToSpecify);
+			$exprTypeWithoutNull = TypeCombinator::removeNull($exprType);
+			if ($exprType->equals($exprTypeWithoutNull)) {
+				continue;
+			}
+
+			$specifiedExpressions[] = new EnsuredNonNullabilityResultExpression($exprToSpecify, $exprType);
+
+			$scope = $scope->specifyExpressionType($exprToSpecify, $exprTypeWithoutNull);
+		}
+
+		return new EnsuredNonNullabilityResult($scope, $specifiedExpressions);
+	}
+
+	/**
+	 * @param Scope $scope
+	 * @param EnsuredNonNullabilityResultExpression[] $specifiedExpressions
+	 * @return Scope
+	 */
+	private function revertNonNullability(Scope $scope, array $specifiedExpressions): Scope
+	{
+		foreach ($specifiedExpressions as $specifiedExpressionResult) {
+			$scope = $scope->specifyExpressionType($specifiedExpressionResult->getExpression(), $specifiedExpressionResult->getOriginalType());
+		}
+
+		return $scope;
+	}
+
 	private function findEarlyTerminatingExpr(Expr $expr, Scope $scope): ?Expr
 	{
 		if (($expr instanceof MethodCall || $expr instanceof Expr\StaticCall) && count($this->earlyTerminatingMethodCalls) > 0) {
@@ -1283,10 +1336,10 @@ class NodeScopeResolver
 			return $leftScope->mergeWith($rightScope);
 			// todo nespouštět pravou stranu pokud je levá always true
 		} elseif ($expr instanceof Coalesce) {
-			// todo ensure non-nullability
-			// todo i pro isset a empty
-			$scope = $this->lookForEnterVariableAssign($scope, $expr->left);
+			$nonNullabilityResult = $this->ensureNonNullability($scope, $expr->left, false);
+			$scope = $this->lookForEnterVariableAssign($nonNullabilityResult->getScope(), $expr->left);
 			$scope = $this->processExprNode($expr->left, $scope, $nodeCallback, $depth + 1);
+			$scope = $this->revertNonNullability($scope, $nonNullabilityResult->getSpecifiedExpressions());
 			$scope = $this->lookForExitVariableAssign($scope, $expr->left);
 			$scope = $this->processExprNode($expr->right, $scope, $nodeCallback, $depth + 1);
 		} elseif ($expr instanceof BinaryOp) {
@@ -1313,13 +1366,17 @@ class NodeScopeResolver
 				$scope = $this->processExprNode($expr->class, $scope, $nodeCallback, $depth + 1);
 			}
 		} elseif ($expr instanceof Expr\Empty_) {
-			$scope = $this->lookForEnterVariableAssign($scope, $expr->expr);
+			$nonNullabilityResult = $this->ensureNonNullability($scope, $expr->expr, true);
+			$scope = $this->lookForEnterVariableAssign($nonNullabilityResult->getScope(), $expr->expr);
 			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
+			$scope = $this->revertNonNullability($scope, $nonNullabilityResult->getSpecifiedExpressions());
 			$scope = $this->lookForExitVariableAssign($scope, $expr->expr);
 		} elseif ($expr instanceof Expr\Isset_) {
 			foreach ($expr->vars as $var) {
-				$scope = $this->lookForEnterVariableAssign($scope, $var);
+				$nonNullabilityResult = $this->ensureNonNullability($scope, $var, true);
+				$scope = $this->lookForEnterVariableAssign($nonNullabilityResult->getScope(), $var);
 				$scope = $this->processExprNode($var, $scope, $nodeCallback, $depth + 1);
+				$scope = $this->revertNonNullability($scope, $nonNullabilityResult->getSpecifiedExpressions());
 				$scope = $this->lookForExitVariableAssign($scope, $var);
 			}
 		} elseif ($expr instanceof Instanceof_) {

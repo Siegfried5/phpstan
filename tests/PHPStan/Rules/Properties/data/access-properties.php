@@ -389,3 +389,17 @@ class AccessInIsset
 	}
 
 }
+
+class RevertNonNullabilityForIsset
+{
+
+	/** @var self|null */
+	private $selfOrNull;
+
+	public function doFoo()
+	{
+		isset($this->selfOrNull->selfOrNull);
+		echo $this->selfOrNull->selfOrNull;
+	}
+
+}

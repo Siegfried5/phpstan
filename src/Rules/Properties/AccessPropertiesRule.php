@@ -63,6 +63,10 @@ class AccessPropertiesRule implements \PHPStan\Rules\Rule
 			return $typeResult->getUnknownClassErrors();
 		}
 
+		if ($scope->isInExpressionAssign($node)) {
+			return [];
+		}
+
 		if (!$type->canAccessProperties()->yes()) {
 			return [
 				sprintf('Cannot access property $%s on %s.', $name, $type->describe(VerbosityLevel::typeOnly())),
@@ -70,7 +74,7 @@ class AccessPropertiesRule implements \PHPStan\Rules\Rule
 		}
 
 		if (!$type->hasProperty($name)->yes()) {
-			if ($scope->isSpecified($node) || $scope->isInExpressionAssign($node)) {
+			if ($scope->isSpecified($node)) {
 				return [];
 			}
 

@@ -21,6 +21,7 @@ use PhpParser\Node\Name;
 use PHPStan\Broker\Broker;
 use PHPStan\ShouldNotHappenException;
 use PHPStan\Type\Accessory\HasOffsetType;
+use PHPStan\Type\Accessory\HasPropertyType;
 use PHPStan\Type\Accessory\NonEmptyArrayType;
 use PHPStan\Type\ArrayType;
 use PHPStan\Type\BooleanType;
@@ -29,6 +30,7 @@ use PHPStan\Type\Constant\ConstantBooleanType;
 use PHPStan\Type\Constant\ConstantFloatType;
 use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\Constant\ConstantStringType;
+use PHPStan\Type\IntersectionType;
 use PHPStan\Type\MixedType;
 use PHPStan\Type\NeverType;
 use PHPStan\Type\NonexistentParentClassType;
@@ -467,6 +469,26 @@ class TypeSpecifier
 						TypeSpecifierContext::createFalse()
 					);
 				}
+
+				if (
+					$var instanceof PropertyFetch
+					&& $var->name instanceof Node\Identifier
+				) {
+					$type = $type->unionWith($this->create($var->var, new IntersectionType([
+						new ObjectWithoutClassType(),
+						new HasPropertyType($var->name->toString())
+					]), TypeSpecifierContext::createTruthy()));
+				} elseif (
+					$var instanceof StaticPropertyFetch
+					&& $var->class instanceof Expr
+					&& $var->name instanceof Node\VarLikeIdentifier
+				) {
+					$type = $type->unionWith($this->create($var->class, new IntersectionType([
+						new ObjectWithoutClassType(),
+						new HasPropertyType($var->name->toString())
+					]), TypeSpecifierContext::createTruthy()));
+				}
+
 				if ($types === null) {
 					$types = $type;
 				} else {

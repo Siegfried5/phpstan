@@ -2290,7 +2290,8 @@ class Scope implements ClassMemberAccessAnswerer
 				$this->getAnonymousFunctionReturnType(),
 				$this->getInFunctionCall(),
 				$this->isNegated(),
-				$this->inFirstLevelStatement
+				$this->inFirstLevelStatement,
+				$this->currentlyAssignedExpressions
 			);
 		} elseif ($expr instanceof Expr\ArrayDimFetch && $expr->dim !== null) {
 			$constantArrays = TypeUtils::getConstantArrays($this->getType($expr->var));
@@ -2485,7 +2486,8 @@ class Scope implements ClassMemberAccessAnswerer
 			$this->getAnonymousFunctionReturnType(),
 			$this->getInFunctionCall(),
 			$this->isNegated(),
-			$this->inFirstLevelStatement
+			$this->inFirstLevelStatement,
+			$this->currentlyAssignedExpressions
 		);
 	}
 
