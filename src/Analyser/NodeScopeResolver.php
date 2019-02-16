@@ -1039,6 +1039,8 @@ class NodeScopeResolver
 						$exprScope = $exprScope->enterExpressionAssign($var);
 					}
 				}
+
+				// !! todo uvnitř processAssignVar (pozor na další volání ->processAssignVar
 				$this->processExprNode($expr->var, $exprScope, $nodeCallback, 1);
 				$scope = $this->processAssignVar(
 					$scope,
