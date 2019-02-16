@@ -1986,7 +1986,7 @@ class Scope implements ClassMemberAccessAnswerer
 				continue;
 			}
 			if ($this->hasVariableType($use->var->name)->no()) {
-				$variableType = new MixedType();
+				$variableType = new ErrorType();
 			} else {
 				$variableType = $this->getVariableType($use->var->name);
 			}

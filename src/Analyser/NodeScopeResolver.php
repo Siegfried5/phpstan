@@ -395,6 +395,7 @@ class NodeScopeResolver
 			$lastElseIfConditionIsTrue = false;
 
 			foreach ($stmt->elseifs as $elseif) {
+				$nodeCallback($elseif, $scope);
 				$elseIfConditionType = $condScope->getType($elseif->cond)->toBoolean();
 				$condScope = $this->processExprNode($elseif->cond, $condScope, $nodeCallback, 1);
 				$branchScopeStatementResult = $this->processStmtNodes($elseif->stmts, $condScope->filterByTruthyValue($elseif->cond), $nodeCallback);
@@ -435,6 +436,7 @@ class NodeScopeResolver
 					$alwaysTerminating = false;
 				}
 			} else {
+				$nodeCallback($stmt->else, $scope);
 				$branchScopeStatementResult = $this->processStmtNodes($stmt->else->stmts, $scope, $nodeCallback);
 
 				if (!$ifAlwaysTrue && !$lastElseIfConditionIsTrue) {
@@ -855,7 +857,9 @@ class NodeScopeResolver
 
 	private function lookForEnterVariableAssign(Scope $scope, Expr $expr): Scope
 	{
-		$scope = $scope->enterExpressionAssign($expr);
+		if (!$expr instanceof ArrayDimFetch || $expr->dim !== null) {
+			$scope = $scope->enterExpressionAssign($expr);
+		}
 		if (!$expr instanceof Variable) {
 			return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
 				return $scope->enterExpressionAssign($expr);
@@ -1074,7 +1078,13 @@ class NodeScopeResolver
 						continue;
 					}
 
-					$this->processExprNode($arrayItem, $this->lookForEnterVariableAssign($scope, $arrayItem->value), $nodeCallback, 1);
+					$itemScope = $scope;
+					if ($arrayItem->value instanceof ArrayDimFetch && $arrayItem->value->dim === null) {
+						$itemScope = $itemScope->enterExpressionAssign($arrayItem->value);
+					}
+					$itemScope = $this->lookForEnterVariableAssign($itemScope, $arrayItem->value);
+
+					$this->processExprNode($arrayItem, $itemScope, $nodeCallback, 1);
 				}
 				$scope = $this->lookForArrayDestructuringArray($scope, $expr->var, $scope->getType($assignedExpr));
 			}
@@ -1702,11 +1712,11 @@ class NodeScopeResolver
 			}
 
 			// 1. eval root expr
-			if ($enterExpressionAssign) {
+			if ($enterExpressionAssign && $var instanceof Variable) {
 				$scope = $scope->enterExpressionAssign($var);
 			}
 			$scope = $this->processExprNode($var, $scope, $nodeCallback, 1);
-			if ($enterExpressionAssign) {
+			if ($enterExpressionAssign && $var instanceof Variable) {
 				$scope = $scope->exitExpressionAssign($var);
 			}
 
