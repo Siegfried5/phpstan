@@ -369,6 +369,7 @@ class NodeScopeResolver
 			]);
 		} elseif ($stmt instanceof If_) {
 			$conditionType = $scope->getType($stmt->cond)->toBoolean();
+			$ifAlwaysTrue = $conditionType instanceof ConstantBooleanType && $conditionType->getValue();
 			$scope = $this->processExprNode($stmt->cond, $scope, $nodeCallback, 1);
 			$exitPoints = [];
 			$finalScope = null;
@@ -387,50 +388,62 @@ class NodeScopeResolver
 				}
 			}
 
+			$condScope = $scope->filterByFalseyValue($stmt->cond);
 			if (!$conditionType instanceof ConstantBooleanType || !$conditionType->getValue()) {
-				$scope = $scope->filterByFalseyValue($stmt->cond);
-				$lastElseIfConditionIsTrue = false;
+				$scope = $condScope;
+			}
+			$lastElseIfConditionIsTrue = false;
 
-				foreach ($stmt->elseifs as $elseif) {
-					$elseIfConditionType = $scope->getType($elseif->cond)->toBoolean();
-					$scope = $this->processExprNode($elseif->cond, $scope, $nodeCallback, 1);
-					$branchScopeStatementResult = $this->processStmtNodes($elseif->stmts, $scope->filterByTruthyValue($elseif->cond), $nodeCallback);
+			foreach ($stmt->elseifs as $elseif) {
+				$elseIfConditionType = $condScope->getType($elseif->cond)->toBoolean();
+				$condScope = $this->processExprNode($elseif->cond, $condScope, $nodeCallback, 1);
+				$branchScopeStatementResult = $this->processStmtNodes($elseif->stmts, $condScope->filterByTruthyValue($elseif->cond), $nodeCallback);
 
-					if (!$lastElseIfConditionIsTrue && (!$elseIfConditionType instanceof ConstantBooleanType
-						|| $elseIfConditionType->getValue())) {
-						$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
-						$branchScope = $branchScopeStatementResult->getScope();
-						$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
-						$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
-						if ($branchScopeStatementResult->isAlwaysTerminating()) {
-							$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
-						}
+				if (
+					!$ifAlwaysTrue
+					&& (
+						!$lastElseIfConditionIsTrue
+						&& (
+							!$elseIfConditionType instanceof ConstantBooleanType
+							|| $elseIfConditionType->getValue()
+						)
+					)
+				) {
+					$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
+					$branchScope = $branchScopeStatementResult->getScope();
+					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
+					$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
+					if ($branchScopeStatementResult->isAlwaysTerminating()) {
+						$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
 					}
-
-					if (
-						$elseIfConditionType instanceof ConstantBooleanType
-						&& $elseIfConditionType->getValue()
-					) {
-						$lastElseIfConditionIsTrue = true;
-					}
-
-					$scope = $scope->filterByFalseyValue($elseif->cond);
 				}
 
-				if ($stmt->else === null) {
+				if (
+					$elseIfConditionType instanceof ConstantBooleanType
+					&& $elseIfConditionType->getValue()
+				) {
+					$lastElseIfConditionIsTrue = true;
+				}
+
+				$condScope = $condScope->filterByFalseyValue($elseif->cond);
+				$scope = $condScope;
+			}
+
+			if ($stmt->else === null) {
+				if (!$ifAlwaysTrue) {
 					$finalScope = $scope->mergeWith($finalScope);
 					$alwaysTerminating = false;
-				} else {
-					$branchScopeStatementResult = $this->processStmtNodes($stmt->else->stmts, $scope, $nodeCallback);
+				}
+			} else {
+				$branchScopeStatementResult = $this->processStmtNodes($stmt->else->stmts, $scope, $nodeCallback);
 
-					if (!$lastElseIfConditionIsTrue) {
-						$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
-						$branchScope = $branchScopeStatementResult->getScope();
-						$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
-						$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
-						if ($branchScopeStatementResult->isAlwaysTerminating()) {
-							$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
-						}
+				if (!$ifAlwaysTrue && !$lastElseIfConditionIsTrue) {
+					$exitPoints = array_merge($exitPoints, $branchScopeStatementResult->getExitPoints());
+					$branchScope = $branchScopeStatementResult->getScope();
+					$finalScope = $branchScopeStatementResult->isAlwaysTerminating() ? $finalScope : $branchScope->mergeWith($finalScope);
+					$alwaysTerminating = $alwaysTerminating && $branchScopeStatementResult->isAlwaysTerminating();
+					if ($branchScopeStatementResult->isAlwaysTerminating()) {
+						$alwaysTerminatingStatements = array_merge($alwaysTerminatingStatements, $branchScopeStatementResult->getAlwaysTerminatingStatements());
 					}
 				}
 			}
