@@ -547,13 +547,11 @@ class NodeScopeResolver
 
 			$condBooleanType = $scope->getType($stmt->cond)->toBoolean();
 			$isIterableAtLeastOnce = $condBooleanType instanceof ConstantBooleanType && $condBooleanType->getValue();
+			// todo u všech cyklů - podmínka nemusí být false, pokud cyklus opustíme skrze break
+			$condScope = $condScope->filterByFalseyValue($stmt->cond);
 			if (!$isIterableAtLeastOnce) {
 				$finalScope = $finalScope->mergeWith($condScope);
 			}
-
-			// todo u všech cyklů - podmínka nemusí být false, pokud cyklus opustíme skrze break
-
-			$finalScope = $finalScope->filterByFalseyValue($stmt->cond);
 
 			return new StatementResult($finalScope, $alwaysTerminatingStatements, []);
 		} elseif ($stmt instanceof Do_) {
