@@ -1027,27 +1027,37 @@ class NodeScopeResolver
 			}
 
 			if (!$expr->var instanceof Array_ && !$expr->var instanceof List_) {
-				$var = $expr->var;
-
-				// todo až uvnitř processAssignVar
-				$exprScope = $scope->enterExpressionAssign($var);
-				while ($var instanceof ArrayDimFetch) {
-					$var = $var->var;
-
-					if ($var instanceof ArrayDimFetch || $var instanceof Variable) {
-						// todo až uvnitř processAssignVar
-						$exprScope = $exprScope->enterExpressionAssign($var);
-					}
-				}
-
-				// !! todo uvnitř processAssignVar (pozor na další volání ->processAssignVar
-				$this->processExprNode($expr->var, $exprScope, $nodeCallback, 1);
 				$scope = $this->processAssignVar(
 					$scope,
 					$expr->var,
-					$assignedExpr
+					$assignedExpr,
+					$nodeCallback,
+					function (Scope $scope) use ($expr, $nodeCallback, $depth): Scope {
+						if ($expr instanceof AssignRef) {
+							$scope = $scope->enterExpressionAssign($expr->expr);
+						}
+
+						if ($expr->expr instanceof Expr\Closure) {
+							$assignedVariable = null;
+							if ($expr->var instanceof Variable && is_string($expr->var->name)) {
+								$assignedVariable = $expr->var->name;
+							}
+							$nodeCallback($expr->expr, $scope);
+							$scope = $this->processClosureNode($expr->expr, $scope, $nodeCallback, $depth + 1, $assignedVariable);
+						} else {
+							$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
+						}
+
+						if ($expr instanceof AssignRef) {
+							$scope = $scope->exitExpressionAssign($expr->expr);
+						}
+
+						return $scope;
+					},
+					true
 				);
 			} else {
+				$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, 1);
 				foreach ($expr->var->items as $arrayItem) {
 					if ($arrayItem === null) {
 						continue;
@@ -1058,24 +1068,6 @@ class NodeScopeResolver
 				$scope = $this->lookForArrayDestructuringArray($scope, $expr->var, $scope->getType($assignedExpr));
 			}
 
-			if ($expr instanceof AssignRef) {
-				$scope = $scope->enterExpressionAssign($expr->expr);
-			}
-
-			if ($expr->expr instanceof Expr\Closure) {
-				$assignedVariable = null;
-				if ($expr->var instanceof Variable && is_string($expr->var->name)) {
-					$assignedVariable = $expr->var->name;
-				}
-				$nodeCallback($expr->expr, $scope);
-				$scope = $this->processClosureNode($expr->expr, $scope, $nodeCallback, $depth + 1, $assignedVariable);
-			} else {
-				$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
-			}
-			if ($expr instanceof AssignRef) {
-				$scope = $scope->exitExpressionAssign($expr->expr);
-			}
-
 			if ($expr->var instanceof Variable && is_string($expr->var->name)) {
 				$comment = CommentHelper::getDocComment($expr);
 				if ($comment !== null) {
@@ -1083,13 +1075,16 @@ class NodeScopeResolver
 				}
 			}
 		} elseif ($expr instanceof Expr\AssignOp) {
-			$this->processExprNode($expr->var, $scope, $nodeCallback, 1);
 			$scope = $this->processAssignVar(
 				$scope,
 				$expr->var,
-				$expr
+				$expr,
+				$nodeCallback,
+				function (Scope $scope) use ($expr, $nodeCallback, $depth): Scope {
+					return $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
+				},
+				false
 			);
-			$scope = $this->processExprNode($expr->expr, $scope, $nodeCallback, $depth + 1);
 		} elseif ($expr instanceof FuncCall) {
 			$parametersAcceptor = null;
 			if ($expr->name instanceof Expr) {
@@ -1431,7 +1426,14 @@ class NodeScopeResolver
 					$scope = $this->processAssignVar(
 						$scope,
 						$expr->var,
-						$newExpr
+						$newExpr,
+						function (): void {
+
+						},
+						function (Scope $scope): Scope {
+							return $scope;
+						},
+						false
 					);
 				}
 			}
@@ -1663,15 +1665,23 @@ class NodeScopeResolver
 	 * @param \PHPStan\Analyser\Scope $scope
 	 * @param \PhpParser\Node\Expr $var
 	 * @param \PhpParser\Node\Expr $assignedExpr
+	 * @param \Closure(\PhpParser\Node $node, Scope $scope): void $nodeCallback
+	 * @param \Closure(Scope $scope): Scope $processExprCallback
+	 * @param bool $enterExpressionAssign
 	 * @return Scope
 	 */
 	private function processAssignVar(
 		Scope $scope,
 		Expr $var,
-		Expr $assignedExpr
+		Expr $assignedExpr,
+		\Closure $nodeCallback,
+		\Closure $processExprCallback,
+		bool $enterExpressionAssign
 	): Scope
 	{
+		$nodeCallback($var, $enterExpressionAssign ? $scope->enterExpressionAssign($var) : $scope);
 		if ($var instanceof Variable && is_string($var->name)) {
+			$scope = $processExprCallback($scope);
 			$scope = $scope->assignVariable($var->name, $scope->getType($assignedExpr));
 		} elseif ($var instanceof ArrayDimFetch) {
 			$dimExprStack = [];
@@ -1681,9 +1691,13 @@ class NodeScopeResolver
 			}
 
 			// 1. eval root expr
-			$scope = $this->processExprNode($var, $scope, function (): void {
-
-			}, 1);
+			if ($enterExpressionAssign) {
+				$scope = $scope->enterExpressionAssign($var);
+			}
+			$scope = $this->processExprNode($var, $scope, $nodeCallback, 1);
+			if ($enterExpressionAssign) {
+				$scope = $scope->exitExpressionAssign($var);
+			}
 
 			// 2. eval dimensions
 			$offsetTypes = [];
@@ -1693,13 +1707,22 @@ class NodeScopeResolver
 
 				} else {
 					$offsetTypes[] = $scope->getType($dimExpr);
-					$scope = $this->processExprNode($dimExpr, $scope, function (): void {
 
-					}, 1);
+					if ($enterExpressionAssign) {
+						$scope->enterExpressionAssign($dimExpr);
+					}
+					$scope = $this->processExprNode($dimExpr, $scope, $nodeCallback, 1);
+
+					if ($enterExpressionAssign) {
+						$scope = $scope->exitExpressionAssign($dimExpr);
+					}
 				}
 			}
 
-			// 3. eval assigned expr, unfortunately this was already done
+			$valueToWrite = $scope->getType($assignedExpr);
+
+			// 3. eval assigned expr
+			$scope = $processExprCallback($scope);
 
 			// 4. compose types
 			$varType = $scope->getType($var);
@@ -1722,7 +1745,6 @@ class NodeScopeResolver
 				$offsetValueTypeStack[] = $offsetValueType;
 			}
 
-			$valueToWrite = $scope->getType($assignedExpr);
 			foreach (array_reverse($offsetTypes) as $offsetType) {
 				/** @var Type $offsetValueType */
 				$offsetValueType = array_pop($offsetValueTypeStack);
@@ -1738,8 +1760,10 @@ class NodeScopeResolver
 				);
 			}
 		} elseif ($var instanceof PropertyFetch) {
+			$scope = $processExprCallback($scope);
 			$scope = $scope->specifyExpressionType($var, $scope->getType($assignedExpr));
 		} elseif ($var instanceof Expr\StaticPropertyFetch) {
+			$scope = $processExprCallback($scope);
 			$scope = $scope->specifyExpressionType($var, $scope->getType($assignedExpr));
 		}
 
