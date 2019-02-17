@@ -4288,23 +4288,23 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				'$bar',
 			],
 			[
-				'*ERROR*',
+				'mixed',
 				'$lorem',
 			],
 			[
-				'*ERROR*',
+				'mixed',
 				'$dolor',
 			],
 			[
-				'*ERROR*',
+				'mixed',
 				'$sit',
 			],
 			[
-				'*ERROR*',
+				'mixed',
 				'$mixedFoo',
 			],
 			[
-				'*ERROR*',
+				'mixed',
 				'$mixedBar',
 			],
 			[
