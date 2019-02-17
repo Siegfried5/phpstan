@@ -473,7 +473,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				$testScope,
 				'mixedVarFromTryCatch',
 				TrinaryLogic::createYes(),
-				'1|1.0',
+				'1.0|1',
 			],
 			[
 				$testScope,
@@ -857,7 +857,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 			[
 				$testScope,
 				'yetAnotherVariableInClosurePassedByReference',
-				'0|1',
+				'int',
 			],
 			[
 				$testScope,

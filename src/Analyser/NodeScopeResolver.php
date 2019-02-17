@@ -388,12 +388,10 @@ class NodeScopeResolver
 				}
 			}
 
-			$condScope = $scope->filterByFalseyValue($stmt->cond);
-			if (!$conditionType instanceof ConstantBooleanType || !$conditionType->getValue()) {
-				$scope = $condScope;
-			}
+			$scope = $scope->filterByFalseyValue($stmt->cond);
 			$lastElseIfConditionIsTrue = false;
 
+			$condScope = $scope;
 			foreach ($stmt->elseifs as $elseif) {
 				$nodeCallback($elseif, $scope);
 				$elseIfConditionType = $condScope->getType($elseif->cond)->toBoolean();
@@ -1035,17 +1033,11 @@ class NodeScopeResolver
 				$scope = $this->processExprNode($expr->name, $scope, $nodeCallback, $depth + 1);
 			}
 		} elseif ($expr instanceof Assign || $expr instanceof AssignRef) {
-			if ($expr instanceof Assign) {
-				$assignedExpr = $expr->expr;
-			} else {
-				$assignedExpr = $expr;
-			}
-
 			if (!$expr->var instanceof Array_ && !$expr->var instanceof List_) {
 				$scope = $this->processAssignVar(
 					$scope,
 					$expr->var,
-					$assignedExpr,
+					$expr->expr,
 					$nodeCallback,
 					function (Scope $scope) use ($expr, $nodeCallback, $depth): Scope {
 						if ($expr instanceof AssignRef) {
@@ -1086,7 +1078,7 @@ class NodeScopeResolver
 
 					$this->processExprNode($arrayItem, $itemScope, $nodeCallback, 1);
 				}
-				$scope = $this->lookForArrayDestructuringArray($scope, $expr->var, $scope->getType($assignedExpr));
+				$scope = $this->lookForArrayDestructuringArray($scope, $expr->var, $scope->getType($expr->expr));
 			}
 
 			if ($expr->var instanceof Variable && is_string($expr->var->name)) {
