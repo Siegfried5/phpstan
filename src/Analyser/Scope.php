@@ -41,6 +41,7 @@ use PHPStan\Type\BenevolentUnionType;
 use PHPStan\Type\BooleanType;
 use PHPStan\Type\CallableType;
 use PHPStan\Type\ClosureType;
+use PHPStan\Type\Constant\ConstantArrayType;
 use PHPStan\Type\Constant\ConstantArrayTypeBuilder;
 use PHPStan\Type\Constant\ConstantBooleanType;
 use PHPStan\Type\Constant\ConstantFloatType;
@@ -2739,14 +2740,71 @@ class Scope implements ClassMemberAccessAnswerer
 		if ($a->equals($b)) {
 			return $a;
 		}
-		$constantTypes = TypeUtils::getAnyConstantTypes($a);
-		$theirConstantTypes = TypeUtils::getAnyConstantTypes($b);
 
-		if (count($constantTypes) > 0 && count($theirConstantTypes) > 0) {
-			return TypeUtils::generalizeType($a);
+		$constantIntegers = ['a' => [], 'b' => []];
+		$constantFloats = ['a' => [], 'b' => []];
+		$constantBooleans = ['a' => [], 'b' => []];
+		$constantStrings = ['a' => [], 'b' => []];
+		$constantArrays = ['a' => [], 'b' => []];
+		$otherTypes = [];
+
+		foreach ([
+			'a' => TypeUtils::flattenTypes($a),
+			'b' => TypeUtils::flattenTypes($b),
+	 	] as $key => $types) {
+			foreach ($types as $type) {
+				if ($type instanceof ConstantIntegerType) {
+					$constantIntegers[$key][] = $type;
+					continue;
+				}
+				if ($type instanceof ConstantFloatType) {
+					$constantFloats[$key][] = $type;
+					continue;
+				}
+				if ($type instanceof ConstantBooleanType) {
+					$constantBooleans[$key][] = $type;
+					continue;
+				}
+				if ($type instanceof ConstantStringType) {
+					$constantStrings[$key][] = $type;
+					continue;
+				}
+				if ($type instanceof ConstantArrayType) {
+					$constantArrays[$key][] = $type;
+					continue;
+				}
+
+				$otherTypes[] = $type;
+			}
 		}
 
-		return $a;
+		$resultTypes = [];
+		foreach ([
+			$constantIntegers,
+			$constantFloats,
+			$constantBooleans,
+			$constantStrings,
+			//$constantArrays,
+		] as $constantTypes) {
+			if (count($constantTypes['a']) === 0) {
+				continue;
+			}
+			if ($constantTypes['b'] === 0) {
+				$resultTypes[] = TypeCombinator::union(...$constantTypes['a']);
+				continue;
+			}
+
+			$aTypes = TypeCombinator::union(...$constantTypes['a']);
+			$bTypes = TypeCombinator::union(...$constantTypes['b']);
+			if ($aTypes->equals($bTypes)) {
+				$resultTypes[] = $aTypes;
+				continue;
+			}
+
+			$resultTypes[] = TypeUtils::generalizeType($constantTypes['a'][0]);
+		}
+
+		return TypeCombinator::union(...$resultTypes, ...$otherTypes);
 	}
 
 	public function equals(self $otherScope): bool
