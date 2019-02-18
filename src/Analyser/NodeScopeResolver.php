@@ -84,6 +84,7 @@ class NodeScopeResolver
 {
 
 	private const LOOP_SCOPE_ITERATIONS = 3;
+	private const GENERALIZE_AFTER_ITERATION = 1;
 
 	/** @var \PHPStan\Broker\Broker */
 	private $broker;
@@ -472,7 +473,9 @@ class NodeScopeResolver
 					$bodyScope = $bodyScope->mergeWith($continueExitPoint->getScope());
 				}
 				if (!$bodyScope->equals($prevScope)) {
-					$bodyScope = $bodyScope->generalizeWith($prevScope);
+					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+						$bodyScope = $bodyScope->generalizeWith($prevScope);
+					}
 				} else {
 					break;
 				}
@@ -506,9 +509,9 @@ class NodeScopeResolver
 			$condScope = $this->processExprNode($stmt->cond, $scope, function (): void {
 
 			}, 1);
-			if (!$condScope->equals($scope)) {
-				$condScope = $condScope->generalizeWith($scope);
-			}
+			//TODO if (!$condScope->equals($scope)) {
+			//	$condScope = $condScope->generalizeWith($scope);
+			//}
 			$bodyScope = $condScope->filterByTruthyValue($stmt->cond);
 			$count = 0;
 			do {
@@ -527,7 +530,9 @@ class NodeScopeResolver
 					$bodyScope = $bodyScope->mergeWith($continueExitPoint->getScope());
 				}
 				if (!$bodyScope->equals($prevScope)) {
-					$bodyScope = $bodyScope->generalizeWith($prevScope);
+					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+						$bodyScope = $bodyScope->generalizeWith($prevScope);
+					}
 				} else {
 					break;
 				}
@@ -576,7 +581,9 @@ class NodeScopeResolver
 
 				}, 1)->filterByTruthyValue($stmt->cond);
 				if (!$bodyScope->equals($prevScope)) {
-					$bodyScope = $bodyScope->generalizeWith($prevScope);
+					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+						$bodyScope = $bodyScope->generalizeWith($prevScope);
+					}
 				} else {
 					break;
 				}
@@ -644,7 +651,9 @@ class NodeScopeResolver
 				}
 
 				if (!$bodyScope->equals($prevScope)) {
-					$bodyScope = $bodyScope->generalizeWith($prevScope);
+					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+						$bodyScope = $bodyScope->generalizeWith($prevScope);
+					}
 				} else {
 					break;
 				}
@@ -1428,7 +1437,7 @@ class NodeScopeResolver
 				|| $expr->var instanceof StaticPropertyFetch
 			) {
 				$expressionType = $scope->getType($expr);
-				if ($expressionType instanceof ConstantScalarType) {
+				if (count(TypeUtils::getConstantScalars($expressionType)) > 0) {
 					$newExpr = $expr;
 					if ($expr instanceof Expr\PostInc) {
 						$newExpr = new Expr\PreInc($expr->var);

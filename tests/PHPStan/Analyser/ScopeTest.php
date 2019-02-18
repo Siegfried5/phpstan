@@ -3,6 +3,7 @@
 namespace PHPStan\Analyser;
 
 use PHPStan\Testing\TestCase;
+use PHPStan\Type\Constant\ConstantArrayType;
 use PHPStan\Type\Constant\ConstantBooleanType;
 use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\Constant\ConstantStringType;
@@ -92,6 +93,66 @@ class ScopeTest extends TestCase
 				new ConstantBooleanType(false),
 				'Foo',
 			],
+			[
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+				], [
+					new ConstantIntegerType(1),
+				]),
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+				], [
+					new ConstantIntegerType(1),
+				]),
+				'array(\'a\' => 1)',
+			],
+			[
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+					new ConstantStringType('b'),
+				], [
+					new ConstantIntegerType(1),
+					new ConstantIntegerType(1),
+				]),
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+					new ConstantStringType('b'),
+				], [
+					new ConstantIntegerType(2),
+					new ConstantIntegerType(1),
+				]),
+				'array(\'a\' => int, \'b\' => 1)',
+			],
+			[
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+				], [
+					new ConstantIntegerType(1),
+				]),
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+					new ConstantStringType('b'),
+				], [
+					new ConstantIntegerType(1),
+					new ConstantIntegerType(1),
+				]),
+				'array<string, 1>',
+			],
+			[
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+				], [
+					new ConstantIntegerType(1),
+				]),
+				new ConstantArrayType([
+					new ConstantStringType('a'),
+					new ConstantStringType('b'),
+				], [
+					new ConstantIntegerType(1),
+					new ConstantIntegerType(2),
+				]),
+				'array<string, int>',
+			],
 		];
 	}
 
@@ -104,7 +165,7 @@ class ScopeTest extends TestCase
 	public function testGeneralize(Type $a, Type $b, string $expectedTypeDescription): void
 	{
 		/** @var ScopeFactory $scopeFactory */
-		$scopeFactory = $this->getContainer()->getByType(ScopeFactory::class);
+		$scopeFactory = self::getContainer()->getByType(ScopeFactory::class);
 		$scopeA = $scopeFactory->create(ScopeContext::create('file.php'))->assignVariable('a', $a);
 		$scopeB = $scopeFactory->create(ScopeContext::create('file.php'))->assignVariable('a', $b);
 		$resultScope = $scopeA->generalizeWith($scopeB);

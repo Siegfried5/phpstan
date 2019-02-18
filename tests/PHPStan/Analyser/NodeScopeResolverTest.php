@@ -7458,7 +7458,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				"'beforeCallback'",
 			],
 			[
-				'bool|int', // could be 1|bool
+				'1|bool',
 				'$progressStarted',
 				"'inCallbackBeforeAssign'",
 			],
@@ -7473,7 +7473,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				"'inCallbackBeforeAssign'",
 			],
 			[
-				'int|true', // could be 1|true
+				'1|true',
 				'$progressStarted',
 				"'inCallbackAfterAssign'",
 			],
@@ -7483,7 +7483,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 				"'inCallbackAfterAssign'",
 			],
 			[
-				'bool|int', // could be 1|bool
+				'1|bool',
 				'$progressStarted',
 				"'afterCallback'",
 			],
@@ -7803,7 +7803,7 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 	{
 		return [
 			[
-				'array(\'i\' => int, \'j\' => int, \'k\' => int, \'l\' => 1, \'m\' => 5, \'key\' => DateTimeImmutable, ?\'n\' => \'str\')',
+				'array(\'i\' => int, \'j\' => int, \'k\' => int, \'key\' => DateTimeImmutable, \'l\' => 1, \'m\' => 5, ?\'n\' => \'str\')',
 				'$array',
 			],
 			[
@@ -7829,6 +7829,14 @@ class NodeScopeResolverTest extends \PHPStan\Testing\TestCase
 			[
 				'\'str\'',
 				'$array[\'n\']',
+			],
+			[
+				'int',
+				'$incremented',
+			],
+			[
+				'0|1',
+				'$setFromZeroToOne',
 			],
 		];
 	}

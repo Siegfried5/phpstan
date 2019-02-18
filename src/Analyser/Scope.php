@@ -1135,14 +1135,21 @@ class Scope implements ClassMemberAccessAnswerer
 			return $this->getType($node->var);
 		} elseif ($node instanceof Expr\PreInc || $node instanceof Expr\PreDec) {
 			$varType = $this->getType($node->var);
-			if ($varType instanceof ConstantScalarType) {
-				$varValue = $varType->getValue();
-				if ($node instanceof Expr\PreInc) {
-					++$varValue;
-				} else {
-					--$varValue;
+			$varScalars = TypeUtils::getConstantScalars($varType);
+			if (count($varScalars) > 0) {
+				$newTypes = [];
+
+				foreach ($varScalars as $scalar) {
+					$varValue = $scalar->getValue();
+					if ($node instanceof Expr\PreInc) {
+						++$varValue;
+					} else {
+						--$varValue;
+					}
+
+					$newTypes[] = $this->getTypeFromValue($varValue);
 				}
-				return $this->getTypeFromValue($varValue);
+				return TypeCombinator::union(...$newTypes);
 			}
 
 			$stringType = new StringType();
@@ -2784,12 +2791,11 @@ class Scope implements ClassMemberAccessAnswerer
 			$constantFloats,
 			$constantBooleans,
 			$constantStrings,
-			//$constantArrays,
 		] as $constantTypes) {
 			if (count($constantTypes['a']) === 0) {
 				continue;
 			}
-			if ($constantTypes['b'] === 0) {
+			if (count($constantTypes['b']) === 0) {
 				$resultTypes[] = TypeCombinator::union(...$constantTypes['a']);
 				continue;
 			}
@@ -2802,6 +2808,34 @@ class Scope implements ClassMemberAccessAnswerer
 			}
 
 			$resultTypes[] = TypeUtils::generalizeType($constantTypes['a'][0]);
+		}
+
+		if (count($constantArrays['a']) > 0) {
+			if (count($constantArrays['b']) === 0) {
+				$resultTypes[] = TypeCombinator::union(...$constantArrays['a']);
+			} else {
+				$constantArraysA = TypeCombinator::union(...$constantArrays['a']);
+				$constantArraysB = TypeCombinator::union(...$constantArrays['b']);
+				if ($constantArraysA->getIterableKeyType()->equals($constantArraysB->getIterableKeyType())) {
+					$resultArrayBuilder = ConstantArrayTypeBuilder::createEmpty();
+					foreach (TypeUtils::flattenTypes($constantArraysA->getIterableKeyType()) as $keyType) {
+						$resultArrayBuilder->setOffsetValueType(
+							$keyType,
+							self::generalizeType(
+								$constantArraysA->getOffsetValueType($keyType),
+								$constantArraysB->getOffsetValueType($keyType)
+							)
+						);
+					}
+
+					$resultTypes[] = $resultArrayBuilder->getArray();
+				} else {
+					$resultTypes[] = new ArrayType(
+						TypeCombinator::union(self::generalizeType($constantArraysA->getIterableKeyType(), $constantArraysB->getIterableKeyType())),
+						TypeCombinator::union(self::generalizeType($constantArraysA->getIterableValueType(), $constantArraysB->getIterableValueType()))
+					);
+				}
+			}
 		}
 
 		return TypeCombinator::union(...$resultTypes, ...$otherTypes);
