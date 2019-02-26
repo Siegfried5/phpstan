@@ -121,8 +121,7 @@ class StatementResultTest extends \PHPStan\Testing\TestCase
 		$result = $nodeScopeResolver->processStmtNodes(
 			$stmts,
 			$scopeFactory->create(ScopeContext::create('test.php')),
-			function (): void {
-
+			static function (): void {
 			}
 		);
 		$this->assertSame($expectedIsAlwaysTerminating, $result->isAlwaysTerminating());

@@ -2,7 +2,6 @@
 
 namespace PHPStan\Analyser;
 
-use function array_keys;
 use PhpParser\Node;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\Array_;
@@ -34,7 +33,6 @@ use PHPStan\Reflection\PassedByReference;
 use PHPStan\Reflection\Php\PhpFunctionFromParserNodeReflection;
 use PHPStan\Reflection\Php\PhpMethodFromParserNodeReflection;
 use PHPStan\Reflection\PropertyReflection;
-use PHPStan\ShouldNotHappenException;
 use PHPStan\TrinaryLogic;
 use PHPStan\Type\ArrayType;
 use PHPStan\Type\BenevolentUnionType;
@@ -2169,7 +2167,7 @@ class Scope implements ClassMemberAccessAnswerer
 	{
 		// todo předělat na array keys
 		$exprString = $this->printer->prettyPrintExpr($expr);
-		$currentlyAssignedExpressions = array_values(array_filter($this->currentlyAssignedExpressions, function (string $evaluatedExprString) use ($exprString): bool {
+		$currentlyAssignedExpressions = array_values(array_filter($this->currentlyAssignedExpressions, static function (string $evaluatedExprString) use ($exprString): bool {
 			return $evaluatedExprString !== $exprString;
 		}));
 
@@ -2473,6 +2471,7 @@ class Scope implements ClassMemberAccessAnswerer
 	}
 
 	/**
+	 * @phpcsSuppress SlevomatCodingStandard.Classes.UnusedPrivateElements.UnusedMethod
 	 * @param Type[] $types
 	 * @return self
 	 */
@@ -2593,9 +2592,11 @@ class Scope implements ClassMemberAccessAnswerer
 				continue;
 			}
 
-			if (!isset($originalVariableTypeHolders[$name])) {
-				$ourVariableTypeHolders[$name] = $variableTypeHolder;
+			if (isset($originalVariableTypeHolders[$name])) {
+				continue;
 			}
+
+			$ourVariableTypeHolders[$name] = $variableTypeHolder;
 		}
 
 		return $ourVariableTypeHolders;
@@ -2616,7 +2617,7 @@ class Scope implements ClassMemberAccessAnswerer
 		$variableTypes = $this->variableTypes;
 		foreach ($byRefUses as $use) {
 			if (!is_string($use->var->name)) {
-				throw new ShouldNotHappenException();
+				throw new \PHPStan\ShouldNotHappenException();
 			}
 
 			$variableName = $use->var->name;
@@ -2758,7 +2759,7 @@ class Scope implements ClassMemberAccessAnswerer
 		foreach ([
 			'a' => TypeUtils::flattenTypes($a),
 			'b' => TypeUtils::flattenTypes($b),
-	 	] as $key => $types) {
+		] as $key => $types) {
 			foreach ($types as $type) {
 				if ($type instanceof ConstantIntegerType) {
 					$constantIntegers[$key][] = $type;

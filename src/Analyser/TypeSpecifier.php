@@ -19,7 +19,6 @@ use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Expr\StaticPropertyFetch;
 use PhpParser\Node\Name;
 use PHPStan\Broker\Broker;
-use PHPStan\ShouldNotHappenException;
 use PHPStan\Type\Accessory\HasOffsetType;
 use PHPStan\Type\Accessory\HasPropertyType;
 use PHPStan\Type\Accessory\NonEmptyArrayType;
@@ -438,7 +437,7 @@ class TypeSpecifier
 			}
 
 			if (count($vars) === 0) {
-				throw new ShouldNotHappenException();
+				throw new \PHPStan\ShouldNotHappenException();
 			}
 
 			$types = null;
@@ -476,7 +475,7 @@ class TypeSpecifier
 				) {
 					$type = $type->unionWith($this->create($var->var, new IntersectionType([
 						new ObjectWithoutClassType(),
-						new HasPropertyType($var->name->toString())
+						new HasPropertyType($var->name->toString()),
 					]), TypeSpecifierContext::createTruthy()));
 				} elseif (
 					$var instanceof StaticPropertyFetch
@@ -485,7 +484,7 @@ class TypeSpecifier
 				) {
 					$type = $type->unionWith($this->create($var->class, new IntersectionType([
 						new ObjectWithoutClassType(),
-						new HasPropertyType($var->name->toString())
+						new HasPropertyType($var->name->toString()),
 					]), TypeSpecifierContext::createTruthy()));
 				}
 

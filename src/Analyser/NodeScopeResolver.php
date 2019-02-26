@@ -2,9 +2,7 @@
 
 namespace PHPStan\Analyser;
 
-use function is_object;
 use PhpParser\Node;
-use PhpParser\Node\Arg;
 use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\Array_;
 use PhpParser\Node\Expr\ArrayDimFetch;
@@ -21,11 +19,9 @@ use PhpParser\Node\Expr\ErrorSuppress;
 use PhpParser\Node\Expr\Exit_;
 use PhpParser\Node\Expr\FuncCall;
 use PhpParser\Node\Expr\Instanceof_;
-use PhpParser\Node\Expr\Isset_;
 use PhpParser\Node\Expr\List_;
 use PhpParser\Node\Expr\MethodCall;
 use PhpParser\Node\Expr\New_;
-use PhpParser\Node\Expr\Print_;
 use PhpParser\Node\Expr\PropertyFetch;
 use PhpParser\Node\Expr\StaticCall;
 use PhpParser\Node\Expr\StaticPropertyFetch;
@@ -33,7 +29,6 @@ use PhpParser\Node\Expr\Ternary;
 use PhpParser\Node\Expr\Variable;
 use PhpParser\Node\Name;
 use PhpParser\Node\Stmt\Break_;
-use PhpParser\Node\Stmt\Catch_;
 use PhpParser\Node\Stmt\Class_;
 use PhpParser\Node\Stmt\Continue_;
 use PhpParser\Node\Stmt\Do_;
@@ -58,8 +53,6 @@ use PHPStan\PhpDoc\Tag\ParamTag;
 use PHPStan\Reflection\ClassReflection;
 use PHPStan\Reflection\ParametersAcceptor;
 use PHPStan\Reflection\ParametersAcceptorSelector;
-use PHPStan\ShouldNotHappenException;
-use PHPStan\TrinaryLogic;
 use PHPStan\Type\ArrayType;
 use PHPStan\Type\CommentHelper;
 use PHPStan\Type\Constant\ConstantArrayType;
@@ -67,13 +60,11 @@ use PHPStan\Type\Constant\ConstantArrayTypeBuilder;
 use PHPStan\Type\Constant\ConstantBooleanType;
 use PHPStan\Type\Constant\ConstantIntegerType;
 use PHPStan\Type\Constant\ConstantStringType;
-use PHPStan\Type\ConstantScalarType;
 use PHPStan\Type\ErrorType;
 use PHPStan\Type\FileTypeMapper;
 use PHPStan\Type\IntegerType;
 use PHPStan\Type\MixedType;
 use PHPStan\Type\NullType;
-use PHPStan\Type\ObjectType;
 use PHPStan\Type\StringType;
 use PHPStan\Type\Type;
 use PHPStan\Type\TypeCombinator;
@@ -112,9 +103,6 @@ class NodeScopeResolver
 
 	/** @var string[][] className(string) => methods(string[]) */
 	private $earlyTerminatingMethodCalls;
-
-	/** @var \PHPStan\Reflection\ClassReflection|null */
-	private $anonymousClassReflection;
 
 	/** @var bool[] filePath(string) => bool(true) */
 	private $analysedFiles;
@@ -172,7 +160,7 @@ class NodeScopeResolver
 		\Closure $nodeCallback
 	): void
 	{
-		foreach ($nodes as $i => $node) {
+		foreach ($nodes as $node) {
 			if (!$node instanceof Node\Stmt) {
 				continue;
 			}
@@ -239,12 +227,14 @@ class NodeScopeResolver
 				$nodeCallback($declare, $scope);
 				$nodeCallback($declare->value, $scope);
 				if (
-					$declare->key->name === 'strict_types'
-					&& $declare->value instanceof Node\Scalar\LNumber
-					&& $declare->value->value === 1
+					$declare->key->name !== 'strict_types'
+					|| !($declare->value instanceof Node\Scalar\LNumber)
+					|| $declare->value->value !== 1
 				) {
-					$scope = $scope->enterDeclareStrictTypes();
+					continue;
 				}
+
+				$scope = $scope->enterDeclareStrictTypes();
 			}
 		} elseif ($stmt instanceof Node\Stmt\Function_) {
 			[$phpDocParameterTypes, $phpDocReturnType, $phpDocThrowType, $isDeprecated, $isInternal, $isFinal] = $this->getPhpDocs($scope, $stmt);
@@ -347,7 +337,7 @@ class NodeScopeResolver
 			} elseif ($stmt instanceof Class_) {
 				$classScope = $scope->enterAnonymousClass($this->broker->getAnonymousClassReflection($stmt, $scope));
 			} else {
-				throw new ShouldNotHappenException();
+				throw new \PHPStan\ShouldNotHappenException();
 			}
 
 			$this->processStmtNodes($stmt->stmts, $classScope, $nodeCallback);
@@ -464,20 +454,19 @@ class NodeScopeResolver
 				$prevScope = $bodyScope;
 				$bodyScope = $bodyScope->mergeWith($scope);
 				$bodyScope = $this->enterForeach($bodyScope, $stmt);
-				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, function (): void {
-
+				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, static function (): void {
 				})->filterOutLoopTerminationStatements();
 				$alwaysTerminating = $bodyScopeResult->isAlwaysTerminating();
 				$bodyScope = $bodyScopeResult->getScope();
 				foreach ($bodyScopeResult->getExitPointsByType(Continue_::class) as $continueExitPoint) {
 					$bodyScope = $bodyScope->mergeWith($continueExitPoint->getScope());
 				}
-				if (!$bodyScope->equals($prevScope)) {
-					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
-						$bodyScope = $bodyScope->generalizeWith($prevScope);
-					}
-				} else {
+				if ($bodyScope->equals($prevScope)) {
 					break;
+				}
+
+				if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+					$bodyScope = $bodyScope->generalizeWith($prevScope);
 				}
 				$count++;
 			} while (!$alwaysTerminating && $count < self::LOOP_SCOPE_ITERATIONS);
@@ -506,8 +495,7 @@ class NodeScopeResolver
 
 			return new StatementResult($finalScope, $alwaysTerminating ? $alwaysTerminatingStatements : [], []);
 		} elseif ($stmt instanceof While_) {
-			$condScope = $this->processExprNode($stmt->cond, $scope, function (): void {
-
+			$condScope = $this->processExprNode($stmt->cond, $scope, static function (): void {
 			}, 1);
 			//TODO if (!$condScope->equals($scope)) {
 			//	$condScope = $condScope->generalizeWith($scope);
@@ -517,11 +505,9 @@ class NodeScopeResolver
 			do {
 				$prevScope = $bodyScope;
 				$bodyScope = $bodyScope->mergeWith($scope);
-				$bodyScope = $this->processExprNode($stmt->cond, $bodyScope, function (): void {
-
+				$bodyScope = $this->processExprNode($stmt->cond, $bodyScope, static function (): void {
 				}, 1)->filterByTruthyValue($stmt->cond);
-				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, function (): void {
-
+				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, static function (): void {
 				})->filterOutLoopTerminationStatements();
 				$alwaysTerminating = $bodyScopeResult->isAlwaysTerminating();
 				$alwaysTerminatingStatements = $bodyScopeResult->getAlwaysTerminatingStatements();
@@ -529,12 +515,12 @@ class NodeScopeResolver
 				foreach ($bodyScopeResult->getExitPointsByType(Continue_::class) as $continueExitPoint) {
 					$bodyScope = $bodyScope->mergeWith($continueExitPoint->getScope());
 				}
-				if (!$bodyScope->equals($prevScope)) {
-					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
-						$bodyScope = $bodyScope->generalizeWith($prevScope);
-					}
-				} else {
+				if ($bodyScope->equals($prevScope)) {
 					break;
+				}
+
+				if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+					$bodyScope = $bodyScope->generalizeWith($prevScope);
 				}
 				$count++;
 			} while (!$alwaysTerminating && $count < self::LOOP_SCOPE_ITERATIONS);
@@ -565,8 +551,7 @@ class NodeScopeResolver
 			$count = 0;
 			do {
 				$prevScope = $bodyScope;
-				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, function (): void {
-
+				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, static function (): void {
 				})->filterOutLoopTerminationStatements();
 				$alwaysTerminating = $bodyScopeResult->isAlwaysTerminating();
 				$bodyScope = $bodyScopeResult->getScope();
@@ -577,15 +562,14 @@ class NodeScopeResolver
 				foreach ($bodyScopeResult->getExitPointsByType(Break_::class) as $breakExitPoint) {
 					$finalScope = $breakExitPoint->getScope()->mergeWith($finalScope);
 				}
-				$bodyScope = $this->processExprNode($stmt->cond, $bodyScope, function (): void {
-
+				$bodyScope = $this->processExprNode($stmt->cond, $bodyScope, static function (): void {
 				}, 1)->filterByTruthyValue($stmt->cond);
-				if (!$bodyScope->equals($prevScope)) {
-					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
-						$bodyScope = $bodyScope->generalizeWith($prevScope);
-					}
-				} else {
+				if ($bodyScope->equals($prevScope)) {
 					break;
+				}
+
+				if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+					$bodyScope = $bodyScope->generalizeWith($prevScope);
 				}
 				$count++;
 			} while (!$alwaysTerminating && $count < self::LOOP_SCOPE_ITERATIONS);
@@ -621,8 +605,7 @@ class NodeScopeResolver
 
 			$bodyScope = $initScope;
 			foreach ($stmt->cond as $condExpr) {
-				$bodyScope = $this->processExprNode($condExpr, $bodyScope, function (): void {
-
+				$bodyScope = $this->processExprNode($condExpr, $bodyScope, static function (): void {
 				}, 1)->filterByTruthyValue($condExpr);
 			}
 
@@ -631,12 +614,10 @@ class NodeScopeResolver
 				$prevScope = $bodyScope;
 				$bodyScope = $bodyScope->mergeWith($initScope);
 				foreach ($stmt->cond as $condExpr) {
-					$bodyScope = $this->processExprNode($condExpr, $bodyScope, function (): void {
-
+					$bodyScope = $this->processExprNode($condExpr, $bodyScope, static function (): void {
 					}, 1)->filterByTruthyValue($condExpr);
 				}
-				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, function (): void {
-
+				$bodyScopeResult = $this->processStmtNodes($stmt->stmts, $bodyScope, static function (): void {
 				})->filterOutLoopTerminationStatements();
 				$alwaysTerminating = $bodyScopeResult->isAlwaysTerminating();
 				$alwaysTerminatingStatements = $bodyScopeResult->getAlwaysTerminatingStatements();
@@ -645,17 +626,16 @@ class NodeScopeResolver
 					$bodyScope = $bodyScope->mergeWith($continueExitPoint->getScope());
 				}
 				foreach ($stmt->loop as $loopExpr) {
-					$bodyScope = $this->processExprNode($loopExpr, $bodyScope, function (): void {
-
+					$bodyScope = $this->processExprNode($loopExpr, $bodyScope, static function (): void {
 					}, 0);
 				}
 
-				if (!$bodyScope->equals($prevScope)) {
-					if ($count >= self::GENERALIZE_AFTER_ITERATION) {
-						$bodyScope = $bodyScope->generalizeWith($prevScope);
-					}
-				} else {
+				if ($bodyScope->equals($prevScope)) {
 					break;
+				}
+
+				if ($count >= self::GENERALIZE_AFTER_ITERATION) {
+					$bodyScope = $bodyScope->generalizeWith($prevScope);
 				}
 				$count++;
 			} while (!$alwaysTerminating && $count < self::LOOP_SCOPE_ITERATIONS);
@@ -827,10 +807,10 @@ class NodeScopeResolver
 		} elseif ($stmt instanceof Node\Stmt\Global_) {
 			foreach ($stmt->vars as $var) {
 				if (!$var instanceof Variable) {
-					throw new ShouldNotHappenException();
+					throw new \PHPStan\ShouldNotHappenException();
 				}
 				if (!is_string($var->name)) {
-					throw new ShouldNotHappenException();
+					throw new \PHPStan\ShouldNotHappenException();
 				}
 				$scope = $this->lookForEnterVariableAssign($scope, $var);
 				$this->processExprNode($var, $scope, $nodeCallback, 1);
@@ -843,7 +823,7 @@ class NodeScopeResolver
 			}
 		} elseif ($stmt instanceof StaticVar) {
 			if (!is_string($stmt->var->name)) {
-				throw new ShouldNotHappenException();
+				throw new \PHPStan\ShouldNotHappenException();
 			}
 			if ($stmt->default !== null) {
 				$this->processExprNode($stmt->default, $scope, $nodeCallback, 1);
@@ -868,7 +848,7 @@ class NodeScopeResolver
 			$scope = $scope->enterExpressionAssign($expr);
 		}
 		if (!$expr instanceof Variable) {
-			return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
+			return $this->lookForVariableAssignCallback($scope, $expr, static function (Scope $scope, Expr $expr): Scope {
 				return $scope->enterExpressionAssign($expr);
 			});
 		}
@@ -880,7 +860,7 @@ class NodeScopeResolver
 	{
 		$scope = $scope->exitExpressionAssign($expr);
 		if (!$expr instanceof Variable) {
-			return $this->lookForVariableAssignCallback($scope, $expr, function (Scope $scope, Expr $expr): Scope {
+			return $this->lookForVariableAssignCallback($scope, $expr, static function (Scope $scope, Expr $expr): Scope {
 				return $scope->exitExpressionAssign($expr);
 			});
 		}
@@ -1026,7 +1006,7 @@ class NodeScopeResolver
 	 * @param int $depth
 	 * @return \PHPStan\Analyser\Scope $scope
 	 */
-	private function processExprNode(Expr $expr, Scope $scope, \Closure $nodeCallback, $depth): Scope
+	private function processExprNode(Expr $expr, Scope $scope, \Closure $nodeCallback, int $depth): Scope
 	{
 		if ($depth === 0 && !$scope->isInFirstLevelStatement()) {
 			$scope = $scope->enterFirstLevelStatements();
@@ -1249,7 +1229,6 @@ class NodeScopeResolver
 			if ($expr->class instanceof Expr) {
 				$scope = $this->processExprNode($expr->class, $scope, $nodeCallback, $depth + 1);
 			}
-			$originalScope = $scope;
 
 			$parametersAcceptor = null;
 			if ($expr->name instanceof Expr) {
@@ -1449,10 +1428,9 @@ class NodeScopeResolver
 						$scope,
 						$expr->var,
 						$newExpr,
-						function (): void {
-
+						static function (): void {
 						},
-						function (Scope $scope): Scope {
+						static function (Scope $scope): Scope {
 							return $scope;
 						},
 						false
@@ -1515,12 +1493,16 @@ class NodeScopeResolver
 				$scope = $scope->enterExpressionAssign($use->var);
 			}
 			$this->processExprNode($use, $scope, $nodeCallback, $depth);
-			if ($use->byRef) {
-				$scope = $scope->exitExpressionAssign($use->var);
-				if ($assignedVariable === $use->var->name) {
-					$assignSelf = true;
-				}
+			if (!$use->byRef) {
+				continue;
 			}
+
+			$scope = $scope->exitExpressionAssign($use->var);
+			if ($assignedVariable !== $use->var->name) {
+				continue;
+			}
+
+			$assignSelf = true;
 		}
 
 		if ($expr->returnType !== null) {
@@ -1541,8 +1523,7 @@ class NodeScopeResolver
 		do {
 			$prevScope = $closureScope;
 
-			$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, function (): void {
-
+			$intermediaryClosureScopeResult = $this->processStmtNodes($expr->stmts, $closureScope, static function (): void {
 			});
 			$intermediaryClosureScope = $intermediaryClosureScopeResult->getScope();
 			foreach ($intermediaryClosureScopeResult->getExitPoints() as $exitPoint) {
@@ -1620,9 +1601,11 @@ class NodeScopeResolver
 		if ($param->type !== null) {
 			$nodeCallback($param->type, $scope);
 		}
-		if ($param->default !== null) {
-			$this->processExprNode($param->default, $scope, $nodeCallback, 1);
+		if ($param->default === null) {
+			return;
 		}
+
+		$this->processExprNode($param->default, $scope, $nodeCallback, 1);
 	}
 
 	/**
@@ -1673,9 +1656,11 @@ class NodeScopeResolver
 				$scopeToPass = $closureBindScope;
 			}
 			$scope = $this->processExprNode($arg->value, $scopeToPass, $nodeCallback, $depth + 1);
-			if ($i === 0 && $closureBindScope !== null) {
-				$scope = $scope->restoreOriginalScopeAfterClosureBind($originalScope);
+			if ($i !== 0 || $closureBindScope === null) {
+				continue;
 			}
+
+			$scope = $scope->restoreOriginalScopeAfterClosureBind($originalScope);
 		}
 
 		// todo $scope = $scope->exitFunctionCall();
